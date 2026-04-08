@@ -69,13 +69,13 @@ All fast tool responses should include:
 
 ### Interpreting results
 
-The `fast_` interface is a **skeleton-backed projection** of the older palace/Qdrant read surface. Some tools are structurally parallel but not semantically identical:
+The `fast_` interface is a **skeleton-backed projection** of the older palace/Qdrant read surface. Some tools are structurally parallel but are meant to follow the local skeleton model rather than reproduce vector-search semantics:
 
 - `mempalace_fast_search` is local rule-based matching over preview text, topics, files, and memory type.
 - `mempalace_fast_check_duplicate` is local exact/subsequence duplicate detection.
 - `mempalace_fast_find_tunnels` currently reports derived room projections rather than a full palace graph bridge analysis.
 
-That means latency comparisons are valid now, but quality/semantic-equivalence claims should be stated carefully.
+That means latency comparisons are valid now, and behavior should be judged by determinism, internal consistency, and usefulness for the local skeleton model.
 
 ### Practical verification commands
 
@@ -118,7 +118,7 @@ python benchmarks/fastmcp_bench.py --sample-transcript
 
 What it does:
 
-- `--sample-transcript` measures temporary transcript → skeleton generation time via `persist_autosave(...)`
+- `--sample-transcript` measures temporary transcript → skeleton generation time via `write_relationship_skeleton(...)`
 - default repo mode benchmarks the current generated `.mempalace/skeleton/` artifacts
 - compares legacy and `fast_` MCP calls where that comparison is meaningful
 - prints JSON that can be saved and compared between runs
@@ -138,7 +138,7 @@ What to look at in the output:
 Recommended interpretation:
 
 - if `same_result_count` is true, both paths are at least returning comparable result volume for that query
-- if `same_semantics` is false, treat the fast path as a retrieval projection rather than a semantic-equivalent replacement
+- if `same_semantics` is false, treat the fast path as a local skeleton retrieval model rather than a vector-semantic substitute
 - repeated runs are useful because the current fast path reparses files on every call and may benefit from future caching work
 
 ### Fast benchmark entrypoint

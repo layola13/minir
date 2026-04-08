@@ -16,8 +16,8 @@ Usage:
 Notes:
 - By default, this benchmark reads the current repository state and uses the
   latest generated skeleton snapshot from `.mempalace/skeleton/__index__.py`.
-- With `--sample-transcript`, it measures `persist_autosave(...)` generation
-  time in isolation inside a temporary workspace.
+- With `--sample-transcript`, it measures transcript-to-skeleton generation in
+  isolation inside a temporary workspace.
 - Legacy search uses the original Qdrant-backed MCP search path.
 - Fast search uses the local skeleton projection and is not semantically
   identical to legacy search.
@@ -35,8 +35,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mempalace.autosave import persist_autosave
-from mempalace.conversation_skeleton import index_output_path, snapshot_skeleton_output_path
+from mempalace.conversation_skeleton import index_output_path, snapshot_skeleton_output_path, write_relationship_skeleton
 from mempalace.skeleton_search import load_index
 
 
@@ -77,20 +76,32 @@ def _sample_transcript_lines() -> list[str]:
     ]
 
 
+_SAMPLE_MEMORIES = [
+    {
+        "content": "We should keep a relationship skeleton for mempalace/autosave.py.",
+        "memory_type": "decision",
+        "chunk_index": 0,
+    },
+    {
+        "content": "The relationship skeleton should link repeated mentions of mempalace/autosave.py.",
+        "memory_type": "decision",
+        "chunk_index": 1,
+    },
+]
+
+
 def _measure_generation() -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         snapshot = root / "benchmark_session.jsonl"
         snapshot.write_text("\n".join(_sample_transcript_lines()) + "\n", encoding="utf-8")
 
-        persist_result, generation_ms = _timed(
-            persist_autosave,
-            snapshot_file=str(snapshot),
-            wing="wing_benchmark",
-            agent="benchmarker",
-            workspace_root=str(root),
-            trigger="stop",
-            session_id="benchmark-session",
+        _, generation_ms = _timed(
+            write_relationship_skeleton,
+            str(root),
+            str(snapshot),
+            "benchmark-session",
+            list(_SAMPLE_MEMORIES),
         )
 
         skeleton_dir = snapshot_skeleton_output_path(str(root), str(snapshot))
@@ -100,16 +111,13 @@ def _measure_generation() -> dict:
             "workspace_root": str(root),
             "snapshot_file": str(snapshot),
             "generation_wall_ms": generation_ms,
-            "persist_result": {
-                "memory_count": persist_result[0],
-                "code_saved": persist_result[1],
-            },
+            "generation_mode": "write_relationship_skeleton",
+            "memory_count": len(_SAMPLE_MEMORIES),
             "skeleton_dir_exists": skeleton_dir.exists(),
             "index_exists": index_path.exists(),
             "latest_snapshot": index_data.get("latest_snapshot"),
             "snapshot_count": index_data.get("snapshot_count", 0),
             "total_memory_count": index_data.get("total_memory_count", 0),
-            "note": "persist_autosave(...) currently measures autosave generation work only. If no skeleton index is written in the temporary workspace, latest_snapshot and snapshot_count remain empty by design.",
         }
 
 
@@ -187,12 +195,13 @@ def _benchmark_repo(snapshot: str, query: str) -> dict:
                 "wall_ms": fast_graph_wall,
                 "reported_elapsed_ms": fast_graph.get("elapsed_ms"),
                 "memory_count": fast_graph.get("memory_count"),
-                "snapshot_count": fast_graph.get("snapshot_count"),
+                "room_count": fast_graph.get("room_count"),
+                "tunnel_rooms": fast_graph.get("tunnel_rooms"),
             },
             "fast_status": {
                 "wall_ms": fast_status_wall,
                 "reported_elapsed_ms": fast_status.get("elapsed_ms"),
-                "snapshot_count": fast_status.get("snapshot_count"),
+                "total_drawers": fast_status.get("total_drawers"),
             },
         },
         "equivalence": {
@@ -211,7 +220,7 @@ def main() -> None:
     parser.add_argument(
         "--sample-transcript",
         action="store_true",
-        help="Measure temporary transcript generation with persist_autosave before repository benchmarks",
+        help="Measure temporary transcript generation with a temporary skeleton snapshot before repository benchmarks",
     )
     args = parser.parse_args()
 

@@ -1,16 +1,16 @@
 # Fast MCP benchmark checkpoint
 
-This document records the current successful state of the skeleton-backed `mempalace_fast_*` benchmark work, with direct side-by-side comparison against the legacy MCP path.
+This document records the current verified state of the skeleton-backed `mempalace_fast_*` benchmark work, with direct side-by-side comparison against the legacy MCP path.
 
 ## What is already working
 
-The repository now has a dedicated benchmark entrypoint for the fast skeleton MCP path:
+The repository has a dedicated benchmark entrypoint for the fast skeleton MCP path:
 
 - `benchmarks/fastmcp_bench.py`
 
-It can measure:
+It currently measures:
 
-- generation latency through `persist_autosave(...)` with `--sample-transcript`
+- temporary sample generation latency through `write_relationship_skeleton(...)` with `--sample-transcript`
 - skeleton index latency
 - skeleton module read latency
 - legacy search latency
@@ -26,63 +26,96 @@ It also reports a simple equivalence summary:
 
 ```bash
 python3 benchmarks/fastmcp_bench.py --query autosave
-python3 benchmarks/fastmcp_bench.py --query benchmark
+python3 benchmarks/fastmcp_bench.py --sample-transcript
 ```
 
 ## Latest successful measured output
 
 Measured against:
 
-- snapshot: `snapshot_20260408_150119_stop`
-- total snapshots: `6`
-- total memory count: `303`
+- sample transcript generation in a temporary workspace
+- repository snapshot: `snapshot_20260408_150119_stop`
+- total snapshots from fast index: `7`
+- total memory count from fast index: `303`
+
+### Sample generation output
+
+| Field | Value |
+| --- | --- |
+| generation mode | `write_relationship_skeleton` |
+| generation wall time | `2.528 ms` |
+| sample memory count | `2` |
+| skeleton dir exists | `true` |
+| index exists | `true` |
+| latest snapshot | `snapshot_benchmark_session` |
+| snapshot count | `1` |
+| total memory count | `2` |
 
 ### Core performance comparison
 
-| Operation | Legacy (`autosave`) | Fast (`autosave`) | Legacy (`benchmark`) | Fast (`benchmark`) | Current comparison |
-| --- | ---: | ---: | ---: | ---: | --- |
-| skeleton index read | 0.119 ms | 0.175 ms | 0.115 ms | 0.117 ms | near parity; fast slightly slower on `autosave`, near equal on `benchmark` |
-| skeleton summary read | 0.095 ms | 0.066 ms | 0.082 ms | 0.064 ms | fast is faster |
-| search | 300.156 ms | 60.849 ms | 273.457 ms | 72.826 ms | fast is much faster |
+| Operation | Legacy (`autosave`) | Fast (`autosave`) | Current comparison |
+| --- | ---: | ---: | --- |
+| skeleton index read | 0.120 ms | 48.207 ms | fast still pays aggregate index cost |
+| skeleton summary read | 3.960 ms | 0.125 ms | fast is faster |
+| search | 350.424 ms | 16.458 ms | fast is much faster |
 
 ### Additional fast-only timings
 
-| Operation | Fast (`autosave`) | Fast (`benchmark`) | Notes |
-| --- | ---: | ---: | --- |
-| fast summary_for | 0.126 ms | 0.102 ms | direct snapshot summary lookup |
-| fast neighbors | 16.868 ms | 2.952 ms | depends on snapshot graph/cache state |
-| fast graph_stats | 69.552 ms | 44.356 ms | still the heaviest fast aggregate call |
-| fast status | 0.768 ms | 0.503 ms | now very cheap |
+| Operation | Fast (`autosave`) | Notes |
+| --- | ---: | --- |
+| fast summary_for | 0.123 ms | direct snapshot summary lookup |
+| fast neighbors | 0.258 ms | local graph lookup |
+| fast graph_stats | 1.245 ms | now much cheaper than earlier iterations |
+| fast status | 0.623 ms | cheap aggregate status read |
 
-### Search equivalence summary
+### Search comparison snapshot
 
 | Query | same_result_count | same_semantics | Interpretation |
 | --- | --- | --- | --- |
-| `autosave` | true | false | fast returns the same number of results, but ranking and semantics differ |
-| `benchmark` | true | false | fast returns results for task-level wording, but is still not semantic-equivalent to legacy |
+| `autosave` | true | false | fast returns the same number of results for this query while preserving its own local skeleton ordering model |
+
+## MCP coverage status
+
+The `fast_` MCP surface now has broad implementation coverage for the main legacy MCP methods.
+
+Current fast methods exist for:
+
+- status / taxonomy / rooms / wings
+- skeleton index / skeleton read / snapshot listing / summary lookup
+- search / duplicate check
+- graph stats / traverse / find tunnels / neighbors
+- top topics / top files
+- AAAK spec
+- knowledge graph query and mutation methods
+- diary read and write methods
+- drawer add and delete methods
+
+These are not placeholder-only method names anymore. The current fast path includes local implementations for KG, diary, and drawer operations in the fast-native layer.
 
 ## Current conclusion
 
 At the current stage:
 
-- the fast path can find results for both explicit code-oriented queries and task-level queries
-- the fast path is not semantically identical to the legacy vector search path
+- the fast path can answer the main MCP read/query surface locally
+- the fast path also includes fast-native diary, drawer, and KG mutation/query operations
+- the fast path is intentionally a local skeleton retrieval model rather than a vector-search clone
+- the fast path is optimized around local skeleton structure, deterministic matching, and speed
 - the fast path is clearly faster for local search
-- the fast path is slightly faster for snapshot summary reads
-- the fast path is now roughly on par for skeleton index reads
-- `fast_graph_stats` remains the slowest of the main fast aggregate operations
+- the fast path is faster for snapshot summary reads
+- the fast path still has a relatively heavy combined index read compared with the legacy plain-file index read
+- the `fast_` MCP namespace is implemented, and the remaining work is about making the local skeleton behavior more correct, more consistent, and better tested on its own terms
 
 ## What improved in this checkpoint
 
-Compared with the earlier checkpoint, the fast path has improved in two important ways:
+Compared with the earlier checkpoint, the fast path has improved in four important ways:
 
 1. repeated parsing overhead has been reduced through in-process caching
 2. `fast_search` now also uses snapshot-level task metadata:
    - `task_description`
    - `task_topics`
    - stronger score breakdown and ranking signals
-
-That means the fast path is no longer limited to node preview, topic, and file-only matching. It can now also surface results from snapshot task intent more reliably.
+3. the `fast_` MCP namespace now has implemented KG, diary, and drawer operations in the fast-native layer
+4. the sample benchmark generation path now produces a real temporary skeleton snapshot and index instead of reporting empty metadata by design
 
 ## Why the results differ
 
@@ -100,7 +133,7 @@ The fast path uses local skeleton projection signals such as:
 So the fast path is currently best understood as:
 
 - a local matching and structure-aware retrieval layer
-- not a drop-in semantic equivalent to the legacy path
+- a deterministic skeleton-native model whose usefulness should be judged by correctness, consistency, and speed
 
 ## Supporting implementation completed
 
@@ -112,11 +145,13 @@ The following work is already done:
 - transcript caveat noise filtered out of task description extraction
 - in-process caching added for repeated skeleton reads and aggregate computations
 - `fast_search` ranking expanded to include snapshot-level task metadata
+- fast-native KG, diary, and drawer methods implemented locally
 - benchmark instructions updated in `benchmarks/BENCHMARKS.md`
+- sample benchmark generation updated to write a real temporary skeleton snapshot/index
 
 ## Verification status
 
-Focused regression tests are still passing:
+Focused regression tests are currently passing:
 
 ```bash
 python3 -m pytest tests/test_conversation_skeleton.py tests/test_autosave.py
@@ -124,11 +159,11 @@ python3 -m pytest tests/test_conversation_skeleton.py tests/test_autosave.py
 
 Latest verified result:
 
-- `8 passed`
+- `12 passed`
 
 ## Next likely improvements
 
-1. Continue improving fast search ranking if stronger hit ordering is needed.
-2. Reduce full-record rebuilds further for status and taxonomy operations.
-3. Consider persisting benchmark JSON outputs under `benchmarks/results_*.json` for repeated comparison.
-4. Decide later whether to build the deferred fast-first / legacy-fallback unified query path.
+1. Add stricter tests for local skeleton search and duplicate behavior on richer mixed fixtures.
+2. Continue improving fast search ordering when direct preview/topic/file/task signals should win.
+3. Compare graph/tunnel counts against richer fixtures and tighten the local room-graph model where useful.
+4. Keep benchmark docs aligned with current measured output.

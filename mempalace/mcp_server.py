@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -19,22 +20,31 @@ from .palace_graph import find_tunnels, graph_stats, traverse
 from .qdrant_store import QdrantClientAdapter, get_store
 from .searcher import search_memories
 from .skeleton_search import (
-    check_duplicate_skeleton,
-    fast_status,
-    find_tunnels_fast,
-    get_taxonomy_fast,
-    graph_stats_fast,
-    list_rooms_fast,
-    list_snapshots,
-    list_wings_fast,
-    load_index,
-    neighbors_fast,
-    read_snapshot_module,
-    search_skeleton,
-    summary_for_snapshot,
-    top_files_fast,
-    top_topics_fast,
-    traverse_fast,
+    add_drawer_fast,
+    delete_drawer_fast,
+    diary_read_fast,
+    diary_write_fast,
+    duplicate_all_fast,
+    find_tunnels_all_fast,
+    graph_stats_all_fast,
+    kg_add_fast,
+    kg_invalidate_fast,
+    kg_query_fast,
+    kg_stats_fast,
+    kg_timeline_fast,
+    list_rooms_all_fast,
+    list_snapshots_all_fast,
+    list_wings_all_fast,
+    load_index_all_fast,
+    neighbors_all_fast,
+    read_any_snapshot_module,
+    search_all_fast,
+    status_all_fast,
+    summary_for_any_snapshot,
+    taxonomy_all_fast,
+    top_files_all_fast,
+    top_topics_all_fast,
+    traverse_all_fast,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
@@ -72,6 +82,10 @@ EXAMPLE:
 
 Read AAAK naturally — expand codes mentally, treat *markers* as emotional context.
 When WRITING AAAK: use entity codes, mark emotions, keep structure tight."""
+
+
+def _elapsed_ms(start: float) -> float:
+    return round((time.perf_counter() - start) * 1000, 3)
 
 
 def _get_collection(create: bool = False):
@@ -205,7 +219,6 @@ def tool_delete_drawer(drawer_id: str):
     return {"success": True, "drawer_id": drawer_id, "result": result}
 
 
-
 def tool_get_aaak_spec():
     return {"aaak_spec": AAAK_SPEC}
 
@@ -286,70 +299,111 @@ def tool_skeleton_read(snapshot: str, module: str):
     }
 
 
-
-
 def tool_fast_status():
-    return fast_status(str(Path.cwd()))
+    result = status_all_fast(str(Path.cwd()))
+    result["protocol"] = PALACE_PROTOCOL
+    result["aaak_dialect"] = AAAK_SPEC
+    return result
 
 
 def tool_fast_skeleton_index():
-    return load_index(str(Path.cwd()))
+    return load_index_all_fast(str(Path.cwd()))
 
 
 def tool_fast_skeleton_read(snapshot: str, module: str):
-    return read_snapshot_module(str(Path.cwd()), snapshot, module)
+    return read_any_snapshot_module(str(Path.cwd()), snapshot, module)
 
 
 def tool_fast_list_snapshots():
-    return list_snapshots(str(Path.cwd()))
+    return list_snapshots_all_fast(str(Path.cwd()))
 
 
 def tool_fast_summary_for(snapshot: str):
-    return summary_for_snapshot(str(Path.cwd()), snapshot)
+    return summary_for_any_snapshot(str(Path.cwd()), snapshot)
 
 
 def tool_fast_list_wings():
-    return list_wings_fast(str(Path.cwd()))
+    return list_wings_all_fast(str(Path.cwd()))
 
 
 def tool_fast_list_rooms(wing: str = None):
-    return list_rooms_fast(str(Path.cwd()), wing=wing)
+    return list_rooms_all_fast(str(Path.cwd()), wing=wing)
 
 
 def tool_fast_get_taxonomy():
-    return get_taxonomy_fast(str(Path.cwd()))
+    return taxonomy_all_fast(str(Path.cwd()))
 
 
 def tool_fast_search(query: str, limit: int = 5, wing: str = None, room: str = None):
-    return search_skeleton(str(Path.cwd()), query=query, wing=wing, room=room, limit=limit)
+    return search_all_fast(str(Path.cwd()), query=query, wing=wing, room=room, limit=limit)
 
 
 def tool_fast_check_duplicate(content: str, threshold: float = 0.9):
-    return check_duplicate_skeleton(str(Path.cwd()), content=content, threshold=threshold)
+    return duplicate_all_fast(str(Path.cwd()), content=content, threshold=threshold)
 
 
 def tool_fast_graph_stats():
-    return graph_stats_fast(str(Path.cwd()))
+    return graph_stats_all_fast(str(Path.cwd()))
 
 
-def tool_fast_neighbors(snapshot: str, node_index: int):
-    return neighbors_fast(str(Path.cwd()), snapshot=snapshot, node_index=node_index)
+def tool_fast_neighbors(snapshot: str, node_index: int = None, drawer_id: str = None):
+    return neighbors_all_fast(str(Path.cwd()), snapshot=snapshot, node_index=node_index, drawer_id=drawer_id)
 
 
 def tool_fast_top_topics(snapshot: str = None):
-    return top_topics_fast(str(Path.cwd()), snapshot=snapshot)
+    return top_topics_all_fast(str(Path.cwd()), snapshot=snapshot)
 
 
 def tool_fast_top_files(snapshot: str = None):
-    return top_files_fast(str(Path.cwd()), snapshot=snapshot)
+    return top_files_all_fast(str(Path.cwd()), snapshot=snapshot)
 
 
 def tool_fast_traverse(start_room: str, max_hops: int = 2):
-    return traverse_fast(str(Path.cwd()), start_room=start_room, max_hops=max_hops)
+    return traverse_all_fast(str(Path.cwd()), start_room=start_room, max_hops=max_hops)
 
 
 def tool_fast_find_tunnels(wing_a: str = None, wing_b: str = None):
-    return find_tunnels_fast(str(Path.cwd()), wing_a=wing_a, wing_b=wing_b)
+    return find_tunnels_all_fast(str(Path.cwd()), wing_a=wing_a, wing_b=wing_b)
+
+
+def tool_fast_get_aaak_spec():
+    start = time.perf_counter()
+    return {"backend": "skeleton", "aaak_spec": AAAK_SPEC, "elapsed_ms": _elapsed_ms(start)}
+
+
+def tool_fast_kg_query(entity: str, as_of: str = None, direction: str = "both"):
+    return kg_query_fast(str(Path.cwd()), entity=entity, as_of=as_of, direction=direction)
+
+
+def tool_fast_kg_add(
+    subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
+):
+    return kg_add_fast(
+        str(Path.cwd()),
+        subject=subject,
+        predicate=predicate,
+        object=object,
+        valid_from=valid_from,
+        source_closet=source_closet,
+    )
+
+
+def tool_fast_kg_invalidate(subject: str, predicate: str, object: str, ended: str = None):
+    return kg_invalidate_fast(
+        str(Path.cwd()),
+        subject=subject,
+        predicate=predicate,
+        object=object,
+        ended=ended,
+    )
+
+
+def tool_fast_kg_timeline(entity: str = None):
+    return kg_timeline_fast(str(Path.cwd()), entity=entity)
+
+
+def tool_fast_kg_stats():
+    return kg_stats_fast(str(Path.cwd()))
 
 
 def tool_kg_query(entity: str, as_of: str = None, direction: str = "both"):
@@ -417,6 +471,10 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general"):
     }
 
 
+def tool_fast_diary_write(agent_name: str, entry: str, topic: str = "general"):
+    return diary_write_fast(str(Path.cwd()), agent_name=agent_name, entry=entry, topic=topic)
+
+
 def tool_diary_read(agent_name: str, last_n: int = 10):
     wing = f"wing_{agent_name.lower().replace(' ', '_')}"
     col = _require_collection()
@@ -448,6 +506,31 @@ def tool_diary_read(agent_name: str, last_n: int = 10):
         "total": len(results["ids"]),
         "showing": len(entries),
     }
+
+
+def tool_fast_diary_read(agent_name: str, last_n: int = 10):
+    return diary_read_fast(str(Path.cwd()), agent_name=agent_name, last_n=last_n)
+
+
+def tool_fast_add_drawer(
+    wing: str,
+    room: str,
+    content: str,
+    source_file: str = None,
+    added_by: str = "claude",
+):
+    return add_drawer_fast(
+        str(Path.cwd()),
+        wing=wing,
+        room=room,
+        content=content,
+        source_file=source_file,
+        added_by=added_by,
+    )
+
+
+def tool_fast_delete_drawer(drawer_id: str):
+    return delete_drawer_fast(str(Path.cwd()), drawer_id=drawer_id)
 
 
 TOOLS = {
@@ -593,6 +676,112 @@ TOOLS = {
             "required": ["snapshot", "node_index"],
         },
         "handler": tool_fast_neighbors,
+    },
+    "mempalace_fast_get_aaak_spec": {
+        "description": "Get the AAAK dialect specification with timing.",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_fast_get_aaak_spec,
+    },
+    "mempalace_fast_kg_query": {
+        "description": "Query the knowledge graph with timing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entity": {"type": "string", "description": "Entity to query"},
+                "as_of": {"type": "string", "description": "Date filter (optional)"},
+                "direction": {"type": "string", "description": "outgoing, incoming, or both"},
+            },
+            "required": ["entity"],
+        },
+        "handler": tool_fast_kg_query,
+    },
+    "mempalace_fast_kg_add": {
+        "description": "Add a fact to the knowledge graph with timing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string"},
+                "predicate": {"type": "string"},
+                "object": {"type": "string"},
+                "valid_from": {"type": "string"},
+                "source_closet": {"type": "string"},
+            },
+            "required": ["subject", "predicate", "object"],
+        },
+        "handler": tool_fast_kg_add,
+    },
+    "mempalace_fast_kg_invalidate": {
+        "description": "Mark a fact as no longer true with timing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string"},
+                "predicate": {"type": "string"},
+                "object": {"type": "string"},
+                "ended": {"type": "string"},
+            },
+            "required": ["subject", "predicate", "object"],
+        },
+        "handler": tool_fast_kg_invalidate,
+    },
+    "mempalace_fast_kg_timeline": {
+        "description": "Chronological timeline of facts with timing.",
+        "input_schema": {"type": "object", "properties": {"entity": {"type": "string"}}},
+        "handler": tool_fast_kg_timeline,
+    },
+    "mempalace_fast_kg_stats": {
+        "description": "Knowledge graph overview with timing.",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_fast_kg_stats,
+    },
+    "mempalace_fast_diary_write": {
+        "description": "Write to the diary with timing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "agent_name": {"type": "string"},
+                "entry": {"type": "string"},
+                "topic": {"type": "string"},
+            },
+            "required": ["agent_name", "entry"],
+        },
+        "handler": tool_fast_diary_write,
+    },
+    "mempalace_fast_diary_read": {
+        "description": "Read recent diary entries with timing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "agent_name": {"type": "string"},
+                "last_n": {"type": "integer"},
+            },
+            "required": ["agent_name"],
+        },
+        "handler": tool_fast_diary_read,
+    },
+    "mempalace_fast_add_drawer": {
+        "description": "File verbatim content through the fast interface with timing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wing": {"type": "string"},
+                "room": {"type": "string"},
+                "content": {"type": "string"},
+                "source_file": {"type": "string"},
+                "added_by": {"type": "string"},
+            },
+            "required": ["wing", "room", "content"],
+        },
+        "handler": tool_fast_add_drawer,
+    },
+    "mempalace_fast_delete_drawer": {
+        "description": "Delete a drawer by ID through the fast interface with timing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"drawer_id": {"type": "string"}},
+            "required": ["drawer_id"],
+        },
+        "handler": tool_fast_delete_drawer,
     },
     "mempalace_list_wings": {
         "description": "List all wings with drawer counts",

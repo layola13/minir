@@ -10,6 +10,10 @@ MEMPAL_AGENT="${MEMPAL_AGENT:-mempalace_hook}"
 WORKSPACE_ROOT="${CLAUDE_PROJECT_DIR:-$REPO_DIR}"
 mkdir -p "$STATE_DIR" "$SNAPSHOT_ROOT"
 
+log_line() {
+    printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$1" >> "$STATE_DIR/hook.log" || true
+}
+
 INPUT=$(cat)
 
 SESSION_ID=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_id','unknown'))" 2>/dev/null || printf 'unknown')
@@ -51,7 +55,7 @@ if [ -f "$LAST_SAVE_FILE" ]; then
 fi
 
 SINCE_LAST=$((EXCHANGE_COUNT - LAST_SAVE))
-echo "[$(date '+%H:%M:%S')] Session $SESSION_ID: $EXCHANGE_COUNT exchanges, $SINCE_LAST since last save" >> "$STATE_DIR/hook.log"
+log_line "Session $SESSION_ID: $EXCHANGE_COUNT exchanges, $SINCE_LAST since last save"
 
 if [ "$SINCE_LAST" -lt "$SAVE_INTERVAL" ] || [ "$EXCHANGE_COUNT" -le 0 ]; then
     echo "{}"
@@ -74,13 +78,21 @@ SNAPSHOT_FILE="$SESSION_DIR/${TIMESTAMP}_stop.jsonl"
 mkdir -p "$SESSION_DIR"
 cp "$TRANSCRIPT_PATH" "$SNAPSHOT_FILE"
 
-echo "[$(date '+%H:%M:%S')] TRIGGERING SAVE at exchange $EXCHANGE_COUNT -> $SNAPSHOT_FILE" >> "$STATE_DIR/hook.log"
+log_line "TRIGGERING SAVE at exchange $EXCHANGE_COUNT -> $SNAPSHOT_FILE"
 
-if PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -m mempalace.autosave "$SNAPSHOT_FILE" --wing "$MEMPAL_WING" --agent "$MEMPAL_AGENT" --workspace-root "$WORKSPACE_ROOT" --trigger stop --session-id "$SESSION_ID" >> "$STATE_DIR/hook.log" 2>&1; then
-    echo "$EXCHANGE_COUNT" > "$LAST_SAVE_FILE"
-    echo "[$(date '+%H:%M:%S')] AUTO-SAVE persisted successfully" >> "$STATE_DIR/hook.log"
+set +e
+PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -m mempalace.autosave "$SNAPSHOT_FILE" --wing "$MEMPAL_WING" --agent "$MEMPAL_AGENT" --workspace-root "$WORKSPACE_ROOT" --trigger stop --session-id "$SESSION_ID" >> "$STATE_DIR/hook.log" 2>&1
+AUTOSAVE_EXIT=$?
+set -e
+
+if [ "$AUTOSAVE_EXIT" -eq 0 ]; then
+    if ! printf '%s\n' "$EXCHANGE_COUNT" > "$LAST_SAVE_FILE"; then
+        log_line "AUTO-SAVE succeeded but failed to update last save marker: $LAST_SAVE_FILE"
+    fi
+    log_line "AUTO-SAVE persisted successfully (exit=$AUTOSAVE_EXIT)"
     echo "{}"
 else
+    log_line "AUTO-SAVE failed (exit=$AUTOSAVE_EXIT) after snapshotting $SNAPSHOT_FILE"
     cat <<HOOKJSON
 {
   "decision": "block",
