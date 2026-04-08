@@ -23,6 +23,17 @@ def test_claude_json():
     os.unlink(f.name)
 
 
+def test_claude_code_message_role_jsonl():
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False)
+    f.write(json.dumps({"message": {"role": "user", "content": "Need autosave"}}) + "\n")
+    f.write(json.dumps({"message": {"role": "assistant", "content": "Autosave enabled"}}) + "\n")
+    f.close()
+    result = normalize(f.name)
+    assert "> Need autosave" in result
+    assert "Autosave enabled" in result
+    os.unlink(f.name)
+
+
 def test_empty():
     f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
     f.close()

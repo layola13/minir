@@ -81,11 +81,13 @@ def _try_claude_code_jsonl(content: str) -> Optional[str]:
             continue
         msg_type = entry.get("type", "")
         message = entry.get("message", {})
-        if msg_type == "human":
+        message_role = message.get("role", "") if isinstance(message, dict) else ""
+        role = message_role or msg_type
+        if role in ("human", "user"):
             text = _extract_content(message.get("content", ""))
             if text:
                 messages.append(("user", text))
-        elif msg_type == "assistant":
+        elif role == "assistant":
             text = _extract_content(message.get("content", ""))
             if text:
                 messages.append(("assistant", text))
