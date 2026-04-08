@@ -16,8 +16,8 @@ Usage:
 Notes:
 - By default, this benchmark reads the current repository state and uses the
   latest generated skeleton snapshot from `.mempalace/skeleton/__index__.py`.
-- With `--sample-transcript`, it first creates a temporary transcript and
-  measures `persist_autosave(...)` generation time in isolation.
+- With `--sample-transcript`, it measures `persist_autosave(...)` generation
+  time in isolation inside a temporary workspace.
 - Legacy search uses the original Qdrant-backed MCP search path.
 - Fast search uses the local skeleton projection and is not semantically
   identical to legacy search.
@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import tempfile
 import time
@@ -37,6 +36,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mempalace.autosave import persist_autosave
+from mempalace.conversation_skeleton import index_output_path, snapshot_skeleton_output_path
 from mempalace.skeleton_search import load_index
 
 
@@ -83,7 +83,7 @@ def _measure_generation() -> dict:
         snapshot = root / "benchmark_session.jsonl"
         snapshot.write_text("\n".join(_sample_transcript_lines()) + "\n", encoding="utf-8")
 
-        _, generation_ms = _timed(
+        persist_result, generation_ms = _timed(
             persist_autosave,
             snapshot_file=str(snapshot),
             wing="wing_benchmark",
@@ -93,15 +93,23 @@ def _measure_generation() -> dict:
             session_id="benchmark-session",
         )
 
+        skeleton_dir = snapshot_skeleton_output_path(str(root), str(snapshot))
+        index_path = index_output_path(str(root))
         index_data = load_index(str(root))
-        latest_snapshot = index_data.get("latest_snapshot")
         return {
             "workspace_root": str(root),
             "snapshot_file": str(snapshot),
-            "latest_snapshot": latest_snapshot,
             "generation_wall_ms": generation_ms,
+            "persist_result": {
+                "memory_count": persist_result[0],
+                "code_saved": persist_result[1],
+            },
+            "skeleton_dir_exists": skeleton_dir.exists(),
+            "index_exists": index_path.exists(),
+            "latest_snapshot": index_data.get("latest_snapshot"),
             "snapshot_count": index_data.get("snapshot_count", 0),
             "total_memory_count": index_data.get("total_memory_count", 0),
+            "note": "persist_autosave(...) currently measures autosave generation work only. If no skeleton index is written in the temporary workspace, latest_snapshot and snapshot_count remain empty by design.",
         }
 
 

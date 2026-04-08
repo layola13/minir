@@ -12,6 +12,122 @@ class DummyStore:
         self.captured.append((drawer_id, text, metadata))
 
 
+
+
+class DummyCollection:
+    def __init__(self):
+        self.records = []
+
+    def add(self, ids, documents, metadatas):
+        for drawer_id, text, metadata in zip(ids, documents, metadatas):
+            self.records.append({"id": drawer_id, "document": text, "metadata": metadata})
+
+    def get(self, where=None, include=None):
+        matched = []
+        for record in self.records:
+            meta = record["metadata"]
+            if _matches_where(meta, where):
+                matched.append(record)
+        return {
+            "ids": [record["id"] for record in matched],
+            "documents": [record["document"] for record in matched],
+            "metadatas": [record["metadata"] for record in matched],
+        }
+
+
+class DummyKG:
+    def __init__(self):
+        self.facts = []
+
+    def add_triple(self, subject, predicate, obj, valid_from=None, source_closet=None, source_file=None):
+        record = {
+            "subject": subject,
+            "predicate": predicate,
+            "object": obj,
+            "valid_from": valid_from,
+            "source_closet": source_closet,
+            "source_file": source_file,
+            "current": True,
+        }
+        self.facts.append(record)
+        return f"triple-{len(self.facts)}"
+
+    def invalidate(self, subject, predicate, obj, ended=None):
+        for fact in self.facts:
+            if fact["subject"] == subject and fact["predicate"] == predicate and fact["object"] == obj and fact.get("current", True):
+                fact["current"] = False
+                fact["valid_to"] = ended or "today"
+
+    def query_entity(self, name, as_of=None, direction="both"):
+        results = []
+        for fact in self.facts:
+            if direction in ("outgoing", "both") and fact["subject"] == name:
+                results.append(
+                    {
+                        "direction": "outgoing",
+                        "subject": fact["subject"],
+                        "predicate": fact["predicate"],
+                        "object": fact["object"],
+                        "valid_from": fact.get("valid_from"),
+                        "valid_to": fact.get("valid_to"),
+                        "confidence": 1.0,
+                        "source_closet": fact.get("source_closet"),
+                        "current": fact.get("current", True),
+                    }
+                )
+            if direction in ("incoming", "both") and fact["object"] == name:
+                results.append(
+                    {
+                        "direction": "incoming",
+                        "subject": fact["subject"],
+                        "predicate": fact["predicate"],
+                        "object": fact["object"],
+                        "valid_from": fact.get("valid_from"),
+                        "valid_to": fact.get("valid_to"),
+                        "confidence": 1.0,
+                        "source_closet": fact.get("source_closet"),
+                        "current": fact.get("current", True),
+                    }
+                )
+        return results
+
+    def timeline(self, entity=None):
+        timeline = []
+        for fact in self.facts:
+            if entity and entity not in {fact["subject"], fact["object"]}:
+                continue
+            timeline.append(
+                {
+                    "subject": fact["subject"],
+                    "predicate": fact["predicate"],
+                    "object": fact["object"],
+                    "valid_from": fact.get("valid_from"),
+                    "valid_to": fact.get("valid_to"),
+                    "current": fact.get("current", True),
+                }
+            )
+        return timeline
+
+    def stats(self):
+        current = sum(1 for fact in self.facts if fact.get("current", True))
+        expired = len(self.facts) - current
+        return {
+            "entities": len({fact["subject"] for fact in self.facts} | {fact["object"] for fact in self.facts}),
+            "triples": len(self.facts),
+            "current_facts": current,
+            "expired_facts": expired,
+            "relationship_types": sorted({fact["predicate"] for fact in self.facts}),
+        }
+
+
+def _matches_where(metadata, where):
+    if not where:
+        return True
+    if "$and" in where:
+        return all(_matches_where(metadata, condition) for condition in where["$and"])
+    return all(metadata.get(key) == value for key, value in where.items())
+
+
 def _patch_store(monkeypatch, captured):
     monkeypatch.setattr("mempalace.autosave.get_store", lambda: DummyStore(captured))
 
@@ -344,6 +460,8 @@ def test_mcp_fast_tools_return_skeleton_results_with_timing(tmp_path, monkeypatc
 
     status_result = mcp_server.tool_fast_status()
     assert status_result["backend"] == "skeleton"
+    assert status_result["protocol"] == mcp_server.PALACE_PROTOCOL
+    assert status_result["aaak_dialect"] == mcp_server.AAAK_SPEC
     assert "elapsed_ms" in status_result
 
     snapshots_result = mcp_server.tool_fast_list_snapshots()
@@ -358,6 +476,9 @@ def test_mcp_fast_tools_return_skeleton_results_with_timing(tmp_path, monkeypatc
     search_result = mcp_server.tool_fast_search("autosave", limit=5)
     assert search_result["backend"] == "skeleton"
     assert search_result["results"]
+    assert "palace_path" in search_result["filters"]
+    assert all("text" in result for result in search_result["results"])
+    assert all("source_file" in result for result in search_result["results"])
     assert "elapsed_ms" in search_result
 
     task_search_result = mcp_server.tool_fast_search("benchmark", limit=5)
@@ -375,9 +496,294 @@ def test_mcp_fast_tools_return_skeleton_results_with_timing(tmp_path, monkeypatc
     assert graph_result["memory_count"] >= 2
     assert "elapsed_ms" in graph_result
 
-    duplicate_result = mcp_server.tool_fast_check_duplicate(
-        "We should keep a relationship skeleton for mempalace/autosave.py."
+
+    aaak_result = mcp_server.tool_fast_get_aaak_spec()
+    assert aaak_result["backend"] == "skeleton"
+    assert "aaak_spec" in aaak_result
+    assert "elapsed_ms" in aaak_result
+
+    kg_add_result = mcp_server.tool_fast_kg_add("Alice", "works_on", "MemPalace", valid_from="2026-04-08")
+    assert kg_add_result["backend"] == "skeleton"
+    assert kg_add_result["success"] is True
+    assert "triple_id" in kg_add_result
+    assert kg_add_result["fact"] == "Alice → works_on → MemPalace"
+    assert "elapsed_ms" in kg_add_result
+
+    kg_query_result = mcp_server.tool_fast_kg_query("Alice")
+    assert kg_query_result["backend"] == "skeleton"
+    assert kg_query_result["count"] >= 1
+    assert any(fact["predicate"] == "works_on" for fact in kg_query_result["facts"])
+    assert "elapsed_ms" in kg_query_result
+
+    kg_stats_result = mcp_server.tool_fast_kg_stats()
+    assert kg_stats_result["backend"] == "skeleton"
+    assert kg_stats_result["triples"] >= 1
+    assert "works_on" in kg_stats_result["relationship_types"]
+    assert "elapsed_ms" in kg_stats_result
+
+    diary_write_result = mcp_server.tool_fast_diary_write("tester", "remember this", topic="general")
+    assert diary_write_result["backend"] == "skeleton"
+    assert diary_write_result["success"] is True
+    assert "entry_id" in diary_write_result
+    assert "elapsed_ms" in diary_write_result
+
+    diary_read_result = mcp_server.tool_fast_diary_read("tester")
+    assert diary_read_result["backend"] == "skeleton"
+    assert diary_read_result["total"] >= 1
+    assert any(entry["content"] == "remember this" for entry in diary_read_result["entries"])
+    assert "elapsed_ms" in diary_read_result
+
+    empty_diary_result = mcp_server.tool_fast_diary_read("nobody")
+    assert empty_diary_result["backend"] == "skeleton"
+    assert empty_diary_result["agent"] == "nobody"
+    assert empty_diary_result["entries"] == []
+    assert empty_diary_result["message"] == "No diary entries yet."
+    assert "elapsed_ms" in empty_diary_result
+
+    add_drawer_result = mcp_server.tool_fast_add_drawer("wing_test", "room_test", "hello world")
+    assert add_drawer_result["backend"] == "skeleton"
+    assert add_drawer_result["success"] is True
+    assert "drawer_id" in add_drawer_result
+    assert "elapsed_ms" in add_drawer_result
+
+    delete_drawer_result = mcp_server.tool_fast_delete_drawer(add_drawer_result["drawer_id"])
+    assert delete_drawer_result["backend"] == "skeleton"
+    assert delete_drawer_result["success"] is True
+    assert delete_drawer_result["drawer_id"] == add_drawer_result["drawer_id"]
+    assert delete_drawer_result["result"] is True
+    assert "elapsed_ms" in delete_drawer_result
+
+    missing_delete_result = mcp_server.tool_fast_delete_drawer("missing-drawer")
+    assert missing_delete_result["backend"] == "skeleton"
+    assert missing_delete_result["success"] is True
+    assert missing_delete_result["drawer_id"] == "missing-drawer"
+    assert missing_delete_result["result"] is False
+    assert "elapsed_ms" in missing_delete_result
+
+    native_snapshot_result = mcp_server.tool_fast_summary_for("fast-native")
+    assert native_snapshot_result["backend"] == "skeleton"
+    assert native_snapshot_result["summary"]["name"] == "fast-native"
+
+    native_nodes_result = mcp_server.tool_fast_skeleton_read("fast-native", "nodes")
+    assert native_nodes_result["backend"] == "skeleton"
+    assert native_nodes_result["success"] is True
+    assert "remember this" in native_nodes_result["content"] or "works_on" in native_nodes_result["content"]
+
+    native_neighbors_result = mcp_server.tool_fast_neighbors("fast-native", drawer_id=diary_write_result["entry_id"])
+    assert native_neighbors_result["backend"] == "skeleton"
+    assert "neighbors" in native_neighbors_result
+    assert "elapsed_ms" in native_neighbors_result
+
+    merged_search_result = mcp_server.tool_fast_search("remember", limit=10)
+    assert any(result.get("record_type") == "diary" for result in merged_search_result["results"])
+
+    merged_duplicate_result = mcp_server.tool_fast_check_duplicate("remember this")
+    assert merged_duplicate_result["backend"] == "skeleton"
+    assert merged_duplicate_result["is_duplicate"] is True
+    assert all(match["similarity"] >= merged_duplicate_result["threshold"] for match in merged_duplicate_result["matches"])
+
+    snapshots_result = mcp_server.tool_fast_list_snapshots()
+    assert "fast-native" in snapshots_result["snapshots"]
+
+    index_result = mcp_server.tool_fast_skeleton_index()
+    assert "fast-native" in index_result["snapshots"]
+    assert index_result["exists"] is True
+
+
+def test_fast_core_shapes_track_legacy_shapes(tmp_path, monkeypatch):
+    snapshot = tmp_path / "session.jsonl"
+    snapshot.write_text(
+        '{"message": {"role": "user", "content": "Track autosave skeleton work for mempalace/autosave.py"}}\n'
+        '{"message": {"role": "assistant", "content": "Done"}}\n',
+        encoding="utf-8",
     )
+
+    captured = []
+    _patch_store(monkeypatch, captured)
+    _patch_memories(monkeypatch, _sample_memories())
+    monkeypatch.setattr("mempalace.autosave._git_repo_root", lambda workspace_root: None)
+
+    persist_autosave(
+        snapshot_file=str(snapshot),
+        wing="wing_test",
+        agent="tester",
+        workspace_root=str(tmp_path),
+        trigger="stop",
+        session_id="session-parity",
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    import mempalace.mcp_server as mcp_server
+
+    importlib.reload(mcp_server)
+
+    legacy_status = mcp_server.tool_status()
+    fast_status = mcp_server.tool_fast_status()
+    assert set(legacy_status.keys()).issubset(set(fast_status.keys()))
+    assert fast_status["protocol"] == legacy_status["protocol"]
+    assert fast_status["aaak_dialect"] == legacy_status["aaak_dialect"]
+
+    legacy_taxonomy = mcp_server.tool_get_taxonomy()
+    fast_taxonomy = mcp_server.tool_fast_get_taxonomy()
+    assert set(legacy_taxonomy.keys()).issubset(set(fast_taxonomy.keys()))
+
+    legacy_list_wings = mcp_server.tool_list_wings()
+    fast_list_wings = mcp_server.tool_fast_list_wings()
+    assert set(legacy_list_wings.keys()).issubset(set(fast_list_wings.keys()))
+
+    legacy_list_rooms = mcp_server.tool_list_rooms()
+    fast_list_rooms = mcp_server.tool_fast_list_rooms()
+    assert set(legacy_list_rooms.keys()).issubset(set(fast_list_rooms.keys()))
+
+    legacy_duplicate = mcp_server.tool_check_duplicate("We should keep a relationship skeleton for mempalace/autosave.py.")
+    fast_duplicate = mcp_server.tool_fast_check_duplicate("We should keep a relationship skeleton for mempalace/autosave.py.")
+    assert set(legacy_duplicate.keys()).issubset(set(fast_duplicate.keys()))
+    assert all(match["similarity"] >= fast_duplicate["threshold"] for match in fast_duplicate["matches"])
+
+    legacy_search = mcp_server.tool_search("autosave", 5)
+    fast_search = mcp_server.tool_fast_search("autosave", 5)
+    assert {"query", "filters", "results"}.issubset(set(fast_search.keys()))
+    assert "palace_path" in fast_search["filters"]
+    if fast_search["results"]:
+        assert {"text", "wing", "room", "source_file", "similarity", "drawer_id"}.issubset(set(fast_search["results"][0].keys()))
+
+    legacy_diary_empty = mcp_server.tool_diary_read("ghost")
+    fast_diary_empty = mcp_server.tool_fast_diary_read("ghost")
+    assert set(legacy_diary_empty.keys()).issubset(set(fast_diary_empty.keys()))
+
+    legacy_kg_query = mcp_server.tool_kg_query("ghost")
+    fast_kg_query = mcp_server.tool_fast_kg_query("ghost")
+    assert set(legacy_kg_query.keys()).issubset(set(fast_kg_query.keys()))
+
+    legacy_kg_add = mcp_server.tool_kg_add("Bob", "knows", "Carol")
+    fast_kg_add = mcp_server.tool_fast_kg_add("Bob", "knows", "Carol")
+    assert set(legacy_kg_add.keys()).issubset(set(fast_kg_add.keys()))
+    assert fast_kg_add["fact"] == legacy_kg_add["fact"]
+
+    legacy_kg_invalidate = mcp_server.tool_kg_invalidate("Bob", "knows", "Carol", ended="2026-04-08")
+    fast_kg_invalidate = mcp_server.tool_fast_kg_invalidate("Bob", "knows", "Carol", ended="2026-04-08")
+    assert set(legacy_kg_invalidate.keys()).issubset(set(fast_kg_invalidate.keys()))
+    assert fast_kg_invalidate["fact"] == legacy_kg_invalidate["fact"]
+
+    legacy_kg_timeline = mcp_server.tool_kg_timeline()
+    fast_kg_timeline = mcp_server.tool_fast_kg_timeline()
+    assert set(legacy_kg_timeline.keys()).issubset(set(fast_kg_timeline.keys()))
+
+    legacy_kg_stats = mcp_server.tool_kg_stats()
+    fast_kg_stats = mcp_server.tool_fast_kg_stats()
+    assert set(legacy_kg_stats.keys()).issubset(set(fast_kg_stats.keys()))
+
+
+    legacy_graph_stats = mcp_server.tool_graph_stats()
+    fast_graph_stats = mcp_server.tool_fast_graph_stats()
+    assert {"elapsed_ms", "backend"}.issubset(set(fast_graph_stats.keys()))
+    assert {"memory_count", "wing_count", "room_count", "edge_count"}.issubset(set(fast_graph_stats.keys()))
+    assert legacy_graph_stats["total_rooms"] >= 0
+
+    legacy_tunnels = mcp_server.tool_find_tunnels()
+    fast_tunnels = mcp_server.tool_fast_find_tunnels()
+    assert {"tunnels", "elapsed_ms", "backend"}.issubset(set(fast_tunnels.keys()))
+    assert isinstance(legacy_tunnels, list)
+    assert isinstance(fast_tunnels["tunnels"], list)
+
+
+def test_fast_graph_and_tunnel_family_return_structured_projection_data(tmp_path, monkeypatch):
+    snapshot = tmp_path / "session_graph.jsonl"
+    snapshot.write_text(
+        '{"message": {"role": "user", "content": "Track autosave skeleton work for mempalace/autosave.py and graph parity."}}\n'
+        '{"message": {"role": "assistant", "content": "Done"}}\n',
+        encoding="utf-8",
+    )
+
+    captured = []
+    _patch_store(monkeypatch, captured)
+    _patch_memories(monkeypatch, _sample_memories())
+    monkeypatch.setattr("mempalace.autosave._git_repo_root", lambda workspace_root: None)
+
+    persist_autosave(
+        snapshot_file=str(snapshot),
+        wing="wing_test",
+        agent="tester",
+        workspace_root=str(tmp_path),
+        trigger="stop",
+        session_id="session-graph",
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    import mempalace.mcp_server as mcp_server
+
+    importlib.reload(mcp_server)
+
+    mcp_server.tool_fast_add_drawer("wing_alpha", "room_shared", "alpha payload")
+    mcp_server.tool_fast_add_drawer("wing_beta", "room_shared", "beta payload")
+    mcp_server.tool_fast_add_drawer("wing_alpha", "room_unique", "unique payload")
+
+    graph_result = mcp_server.tool_fast_graph_stats()
+    assert graph_result["backend"] == "skeleton"
+    assert graph_result["memory_count"] >= 1
+    assert graph_result["wing_count"] >= 1
+    assert graph_result["room_count"] >= 1
+    assert graph_result["edge_count"] >= 0
+    assert "elapsed_ms" in graph_result
+
+    tunnels_result = mcp_server.tool_fast_find_tunnels("wing_alpha", "wing_beta")
+    assert tunnels_result["backend"] == "skeleton"
+    assert tunnels_result["wing_a"] == "wing_alpha"
+    assert tunnels_result["wing_b"] == "wing_beta"
+    assert isinstance(tunnels_result["tunnels"], list)
+    assert any(tunnel["room"] == "room_shared" for tunnel in tunnels_result["tunnels"])
+
+    traverse_result = mcp_server.tool_fast_traverse("room_shared", max_hops=2)
+    assert traverse_result["backend"] == "skeleton"
+    assert traverse_result["start_room"] == "room_shared"
+    assert traverse_result["max_hops"] == 2
+    assert isinstance(traverse_result["paths"], list)
+    assert "elapsed_ms" in traverse_result
+
+    snapshot = tmp_path / "session_search.jsonl"
+    snapshot.write_text(
+        '{"message": {"role": "user", "content": "Track autosave skeleton work for mempalace/autosave.py and benchmark search."}}\n'
+        '{"message": {"role": "assistant", "content": "Done"}}\n',
+        encoding="utf-8",
+    )
+
+    captured = []
+    _patch_store(monkeypatch, captured)
+    _patch_memories(monkeypatch, _sample_memories())
+    monkeypatch.setattr("mempalace.autosave._git_repo_root", lambda workspace_root: None)
+
+    persist_autosave(
+        snapshot_file=str(snapshot),
+        wing="wing_test",
+        agent="tester",
+        workspace_root=str(tmp_path),
+        trigger="stop",
+        session_id="session-search",
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    import mempalace.mcp_server as mcp_server
+
+    importlib.reload(mcp_server)
+
+    mcp_server.tool_fast_add_drawer("wing_test", "room_test", "autosave benchmark payload")
+    mcp_server.tool_fast_diary_write("tester", "autosave benchmark payload", topic="general")
+
+    fast_search = mcp_server.tool_fast_search("autosave", 10)
+    assert fast_search["backend"] == "skeleton"
+    assert "palace_path" in fast_search["filters"]
+    assert fast_search["results"]
+    assert all("text" in result for result in fast_search["results"])
+    assert all("source_file" in result for result in fast_search["results"])
+    assert all("drawer_id" in result for result in fast_search["results"])
+
+    duplicate_result = mcp_server.tool_fast_check_duplicate("autosave benchmark payload", threshold=1.0)
     assert duplicate_result["backend"] == "skeleton"
     assert duplicate_result["is_duplicate"] is True
-    assert "elapsed_ms" in duplicate_result
+    assert duplicate_result["matches"]
+    assert all(match["similarity"] >= 1.0 for match in duplicate_result["matches"])
+    ids = [match["id"] for match in duplicate_result["matches"]]
+    assert len(ids) == len(set(ids))
