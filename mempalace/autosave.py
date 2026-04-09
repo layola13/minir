@@ -117,8 +117,8 @@ def persist_autosave(
         )
         memory_count += 1
 
-    if memories:
-        write_relationship_skeleton(workspace_root, source_file, session_id, memories)
+    skeleton_dir, _ = write_relationship_skeleton(workspace_root, source_file, session_id, memories)
+    wrote_skeleton = skeleton_dir.exists()
 
     repo_root = _git_repo_root(workspace_root)
     if repo_root:
@@ -135,7 +135,7 @@ def persist_autosave(
                 {"trigger": trigger, "workspace_root": workspace_root, "repo_root": repo_root},
             )
             return memory_count, True
-        return memory_count, False
+        return memory_count, wrote_skeleton
 
     summary = _summarize_file_changes(normalized)
     if summary:
@@ -150,7 +150,7 @@ def persist_autosave(
             {"trigger": trigger, "workspace_root": workspace_root},
         )
         return memory_count, True
-    return memory_count, False
+    return memory_count, wrote_skeleton
 
 
 def main() -> int:
@@ -165,7 +165,7 @@ def main() -> int:
     parser.add_argument("--session-id", default="unknown")
     args = parser.parse_args()
 
-    persist_autosave(
+    memory_count, code_saved = persist_autosave(
         snapshot_file=args.snapshot_file,
         wing=args.wing,
         agent=args.agent,
@@ -173,7 +173,7 @@ def main() -> int:
         trigger=args.trigger,
         session_id=args.session_id,
     )
-    return 0
+    return 0 if (memory_count > 0 or code_saved) else 1
 
 
 if __name__ == "__main__":

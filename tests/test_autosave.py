@@ -378,6 +378,99 @@ def test_save_hook_keeps_successful_autosave_successful(tmp_path):
 
 
 
+def test_precompact_hook_writes_workspace_skeleton_even_without_extracted_memories(tmp_path):
+    repo_root = Path("/home/vscode/projects/mempalace")
+    home = tmp_path / "home"
+    hook_state = home / ".mempalace" / "hook_state"
+    snapshots_root = hook_state / "transcript_snapshots"
+    session_id = "precompact-regression-session"
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "".join(
+            json.dumps({"message": {"role": "user", "content": f"Created src/new_feature_{idx}.py because we need autosave relationship tracking"}}) + "\n"
+            for idx in range(15)
+        ) + json.dumps({"message": {"role": "assistant", "content": "Sounds good, let us keep a skeleton"}}) + "\n",
+        encoding="utf-8",
+    )
+
+    payload = json.dumps(
+        {
+            "session_id": session_id,
+            "transcript_path": str(transcript),
+        }
+    )
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+        "PYTHONPATH": str(repo_root),
+    }
+
+    result = subprocess.run(
+        ["/bin/bash", str(repo_root / "hooks" / "mempal_precompact_hook.sh")],
+        input=payload,
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "{}"
+
+    session_snapshot_dir = snapshots_root / session_id
+    assert session_snapshot_dir.exists()
+    precompact_snapshots = [path for path in session_snapshot_dir.iterdir() if path.name.endswith("_precompact.jsonl")]
+    assert precompact_snapshots
+
+    expected_skeleton_dir = snapshot_skeleton_output_path(str(tmp_path), str(precompact_snapshots[0]))
+    assert expected_skeleton_dir.exists()
+    assert (expected_skeleton_dir / "summary.py").exists()
+
+    hook_log = (hook_state / "hook.log").read_text(encoding="utf-8")
+    assert f"PRE-COMPACT triggered for session {session_id}" in hook_log
+    assert "PRE-COMPACT auto-save persisted successfully (exit=0)" in hook_log
+    assert "did not write expected skeleton directory" not in hook_log
+
+
+def test_persist_autosave_writes_skeleton_with_zero_extracted_memories(tmp_path):
+    snapshot = tmp_path / "session_zero_memory.jsonl"
+    snapshot.write_text(
+        "".join(
+            json.dumps({"message": {"role": "user", "content": f"Created src/new_feature_{idx}.py because we need autosave relationship tracking"}}) + "\n"
+            for idx in range(15)
+        ) + json.dumps({"message": {"role": "assistant", "content": "Sounds good, let us keep a skeleton"}}) + "\n",
+        encoding="utf-8",
+    )
+
+    memory_count, code_saved = persist_autosave(
+        snapshot_file=str(snapshot),
+        wing="wing_test",
+        agent="tester",
+        workspace_root=str(tmp_path),
+        trigger="precompact",
+        session_id="zero-memory-session",
+    )
+
+    skeleton_dir = snapshot_skeleton_output_path(str(tmp_path), str(snapshot))
+    assert memory_count == 0
+    assert code_saved is True
+    assert skeleton_dir.exists()
+    assert (skeleton_dir / "summary.py").exists()
+    summary_text = (skeleton_dir / "summary.py").read_text(encoding="utf-8")
+    assert "TASK_DESCRIPTION = 'Created src/new_feature_0.py because we need autosave relationship tracking'" in summary_text
+    assert "MEMORY_COUNT = 0" in summary_text
+    assert index_output_path(str(tmp_path)).exists()
+
+
+
+
+
+
+
+
+
+
 def test_index_points_to_most_recent_snapshot_without_duplicate_directory(tmp_path, monkeypatch):
     first_snapshot = tmp_path / "20260101_000000_stop.jsonl"
     second_snapshot = tmp_path / "20260101_000100_stop.jsonl"

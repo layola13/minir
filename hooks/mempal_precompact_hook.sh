@@ -42,10 +42,16 @@ PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -m mempalace.autosave 
 AUTOSAVE_EXIT=$?
 set -e
 
-if [ "$AUTOSAVE_EXIT" -eq 0 ]; then
+SNAPSHOT_STEM="$(basename "$SNAPSHOT_FILE" .jsonl)"
+EXPECTED_SKELETON_DIR="$WORKSPACE_ROOT/.mempalace/skeleton/snapshot_${SNAPSHOT_STEM}"
+
+if [ "$AUTOSAVE_EXIT" -eq 0 ] && [ -d "$EXPECTED_SKELETON_DIR" ]; then
     log_line "PRE-COMPACT auto-save persisted successfully (exit=$AUTOSAVE_EXIT) -> $SNAPSHOT_FILE"
     echo "{}"
 else
+    if [ "$AUTOSAVE_EXIT" -eq 0 ]; then
+        log_line "PRE-COMPACT auto-save exited 0 but did not write expected skeleton directory: $EXPECTED_SKELETON_DIR"
+    fi
     log_line "PRE-COMPACT auto-save failed (exit=$AUTOSAVE_EXIT) after snapshotting $SNAPSHOT_FILE"
     cat <<HOOKJSON
 {
