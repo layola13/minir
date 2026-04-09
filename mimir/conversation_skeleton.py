@@ -335,12 +335,11 @@ def build_relationship_skeleton(memories: Sequence[Dict[str, object]]) -> Tuple[
     node_file_indexes = _node_file_indexes(memories)
 
     init_lines = [
-        "from mimir.summary import SNAPSHOT_NAME, TASK_DESCRIPTION, TASK_TOPICS, snapshot_overview",
-        "from mimir.nodes import MemoryNode, NODES, NODE_TYPES, NODE_TOPICS, NODE_FILES",
-        "from mimir.topics import TopicCluster",
-        "from mimir.files import FileReference",
-        "from mimir.patterns import PatternGroup",
-        "from mimir.edges import RelationGraph",
+        "from .nodes import MemoryNode, NODES, NODE_TYPES, NODE_TOPICS, NODE_FILES",
+        "from .topics import TopicCluster",
+        "from .files import FileReference",
+        "from .patterns import PatternGroup",
+        "from .edges import RelationGraph",
         "",
         "graph = RelationGraph()",
         "",
@@ -437,10 +436,10 @@ def build_relationship_skeleton(memories: Sequence[Dict[str, object]]) -> Tuple[
     edges_lines = [
         "from __future__ import annotations",
         "",
-        "from mimir.nodes import NODES",
-        "from mimir.topics import TOPIC_CLUSTERS",
-        "from mimir.files import FILE_REFERENCES",
-        "from mimir.patterns import REPEATED_PATTERNS",
+        "from .nodes import NODES",
+        "from .topics import TOPIC_CLUSTERS",
+        "from .files import FILE_REFERENCES",
+        "from .patterns import REPEATED_PATTERNS",
         "",
         "class RelationGraph:",
         f"    memory_count = {len(memories)}",
@@ -766,14 +765,6 @@ def write_relationship_skeleton(
     output_dir = snapshot_skeleton_output_path(workspace_root, snapshot_file)
     preview, stats = build_relationship_skeleton(memories)
     package = _build_package(preview)
-    messages = _extract_session_messages(snapshot_file)
-    snapshot_name = _snapshot_package_name(snapshot_file)
-    package["summary.py"] = _summary_module_text(
-        snapshot_name=snapshot_name,
-        task_description=_task_description(messages),
-        task_topics=_task_topics(messages, memories),
-        stats=stats,
-    )
     _write_package(output_dir, package)
     _write_index(root_dir)
     return output_dir, stats

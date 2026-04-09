@@ -39,6 +39,6 @@ def test_build_relationship_skeleton_groups_topics_files_and_patterns():
     assert "NODE_TYPES" in text
     assert "NODE_TOPICS" in text
     assert "NODE_FILES" in text
-    assert "from mimir.summary import SNAPSHOT_NAME, TASK_DESCRIPTION, TASK_TOPICS, snapshot_overview" in text
+    assert "from .nodes import MemoryNode, NODES, NODE_TYPES, NODE_TOPICS, NODE_FILES" in text
     assert stats["memory_count"] == 3
     assert stats["edge_count"] >= 0

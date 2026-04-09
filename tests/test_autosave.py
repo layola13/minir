@@ -62,7 +62,6 @@ def test_persist_autosave_writes_skeleton_package(tmp_path, monkeypatch):
     assert wrote_skeleton is True
     assert skeleton_dir.exists()
     assert index_file.exists()
-    assert (skeleton_dir / "summary.py").exists()
     assert (skeleton_dir / "nodes.py").exists()
     
     index_text = index_file.read_text(encoding="utf-8")

@@ -21,29 +21,106 @@ STOP_HOOK_ACTIVE=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(jso
 TRANSCRIPT_PATH=$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('transcript_path',''))" 2>/dev/null || printf '')
 TRANSCRIPT_PATH="${TRANSCRIPT_PATH/#\~/$HOME}"
 
+if command -v flock >/dev/null 2>&1; then
+    LOCK_FILE="$STATE_DIR/${SESSION_ID}.stop.lock"
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+        log_line "Session $SESSION_ID: duplicate concurrent Stop hook, skipped"
+        echo "{}"
+        exit 0
+    fi
+fi
+
+log_line "Stop payload: session=$SESSION_ID stop_hook_active=$STOP_HOOK_ACTIVE transcript_path=${TRANSCRIPT_PATH:-<empty>} exists=$([ -f "$TRANSCRIPT_PATH" ] && echo yes || echo no)"
+
 if [ "$STOP_HOOK_ACTIVE" = "True" ] || [ "$STOP_HOOK_ACTIVE" = "true" ]; then
     echo "{}"
     exit 0
 fi
 
 if [ -f "$TRANSCRIPT_PATH" ]; then
-    EXCHANGE_COUNT=$(python3 -c "
+    EXCHANGE_COUNT=$(python3 - "$TRANSCRIPT_PATH" <<'PY'
 import json
-count = 0
-with open('$TRANSCRIPT_PATH', encoding='utf-8', errors='replace') as f:
+import sys
+
+path = sys.argv[1]
+claude_count = 0
+codex_response_count = 0
+codex_event_count = 0
+
+def _text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                if "text" in item:
+                    parts.append(str(item.get("text", "")))
+        return " ".join(part for part in parts if part).strip()
+    if isinstance(content, dict):
+        if "text" in content:
+            return str(content.get("text", ""))
+    return ""
+
+def _is_noise(text):
+    normalized = text.strip()
+    if not normalized:
+        return True
+    if "<command-message>" in normalized:
+        return True
+    if normalized.startswith("<environment_context>"):
+        return True
+    return False
+
+with open(path, encoding="utf-8", errors="replace") as f:
     for line in f:
+        line = line.strip()
+        if not line:
+            continue
         try:
             entry = json.loads(line)
-            msg = entry.get('message', {})
-            if isinstance(msg, dict) and msg.get('role') == 'user':
-                content = msg.get('content', '')
-                if isinstance(content, str) and '<command-message>' in content:
-                    continue
-                count += 1
         except Exception:
-            pass
-print(count)
-" 2>/dev/null)
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        # Claude transcript format.
+        msg = entry.get("message")
+        if isinstance(msg, dict) and msg.get("role") in {"user", "human"}:
+            text = _text(msg.get("content", ""))
+            if not _is_noise(text):
+                claude_count += 1
+            continue
+
+        # Codex transcript format (preferred to avoid double-counting event_msg).
+        if entry.get("type") == "response_item":
+            payload = entry.get("payload", {})
+            if isinstance(payload, dict) and payload.get("type") == "message" and payload.get("role") == "user":
+                text = _text(payload.get("content", ""))
+                if not _is_noise(text):
+                    codex_response_count += 1
+            continue
+
+        # Fallback for older Codex traces.
+        if entry.get("type") == "event_msg":
+            payload = entry.get("payload", {})
+            if isinstance(payload, dict) and payload.get("type") == "user_message":
+                text = str(payload.get("message", ""))
+                if not _is_noise(text):
+                    codex_event_count += 1
+            continue
+
+if codex_response_count > 0:
+    print(codex_response_count)
+elif claude_count > 0:
+    print(claude_count)
+else:
+    print(codex_event_count)
+PY
+)
 else
     EXCHANGE_COUNT=0
 fi
