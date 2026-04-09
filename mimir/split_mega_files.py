@@ -29,11 +29,11 @@ import re
 from pathlib import Path
 
 HOME = Path.home()
-LUMI_DIR = Path(os.environ.get("MEMPALACE_SOURCE_DIR", str(HOME / "Desktop/transcripts")))
+LUMI_DIR = Path(os.environ.get("MIMIR_SOURCE_DIR", str(HOME / "Desktop/transcripts")))
 
 # People we know about (for name detection in content)
-# Loaded from ~/.mempalace/known_names.json if it exists, otherwise generic fallback.
-_KNOWN_NAMES_PATH = HOME / ".mempalace" / "known_names.json"
+# Loaded from ~/.mimir/known_names.json if it exists, otherwise generic fallback.
+_KNOWN_NAMES_PATH = HOME / ".mimir" / "known_names.json"
 
 
 def _load_known_people() -> list:
@@ -46,7 +46,7 @@ def _load_known_people() -> list:
             return data.get("names", [])
         except (json.JSONDecodeError, OSError):
             pass
-    # Generic fallback — override by creating ~/.mempalace/known_names.json
+    # Generic fallback — override by creating ~/.mimir/known_names.json
     return ["Alice", "Ben", "Riley", "Max", "Sam", "Devon", "Jordan"]
 
 
@@ -133,7 +133,7 @@ def extract_people(lines):
     dir_match = re.search(r"/Users/(\w+)/", text)
     if dir_match:
         username = dir_match.group(1)
-        # User can map usernames to names in ~/.mempalace/known_names.json
+        # User can map usernames to names in ~/.mimir/known_names.json
         # under a "username_map" key, e.g. {"username_map": {"jdoe": "John"}}
         username_map = _load_username_map()
         if username in username_map:
@@ -220,7 +220,7 @@ def main():
         "--source",
         type=str,
         default=None,
-        help="Source directory (default: MEMPALACE_SOURCE_DIR or ~/Desktop/transcripts)",
+        help="Source directory (default: MIMIR_SOURCE_DIR or ~/Desktop/transcripts)",
     )
     parser.add_argument(
         "--output-dir", type=str, default=None, help="Output directory (default: same as source)"

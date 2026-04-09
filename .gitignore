@@ -15,3 +15,8 @@ mempalace-mcp
 mempalace-up
 tmp/
 .mempalace/
+.mimir/
+.gemini/
+.claude.json
+benchmarks/results.json
+benchmarks/skeleton_pure_perf.json

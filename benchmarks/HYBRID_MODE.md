@@ -196,8 +196,8 @@ python benchmarks/longmemeval_bench.py data/longmemeval_s_cleaned.json --mode hy
 
 ```bash
 # Setup
-git clone -b ben/benchmarking https://github.com/aya-thekeeper/mempal.git
-cd mempal
+git clone -b ben/benchmarking https://github.com/aya-thekeeper/mimir.git
+cd mimir
 pip install chromadb
 
 # Download data
@@ -446,7 +446,7 @@ All five `PersistentClient + tmpdir` patterns replaced with a module-level singl
 ```python
 _bench_client = chromadb.EphemeralClient()
 
-def _fresh_collection(name="mempal_drawers"):
+def _fresh_collection(name="mimir_drawers"):
     try:
         _bench_client.delete_collection(name)
     except Exception:

@@ -8,7 +8,7 @@ Not latent vectors. Not English prose. A universal memory compression dialect.
 
 Works with: Claude, ChatGPT, Gemini, Llama, Mistral -- any model that reads text.
 
-Adapted for mempalace: works standalone on plain text and ChromaDB drawers.
+Adapted for mimir: works standalone on plain text and ChromaDB drawers.
 No dependency on palace.py or layers.py.
 
 FORMAT:
@@ -403,7 +403,7 @@ class Dialect:
             flags.append("PIVOT")
         return "+".join(flags) if flags else ""
 
-    # === PLAIN TEXT COMPRESSION (new for mempalace) ===
+    # === PLAIN TEXT COMPRESSION (new for mimir) ===
 
     def _detect_emotions(self, text: str) -> List[str]:
         """Detect emotions from plain text using keyword signals."""
@@ -540,7 +540,7 @@ class Dialect:
         """
         Compress plain text into AAAK Dialect format.
 
-        This is the primary method for mempalace: takes any text content
+        This is the primary method for mimir: takes any text content
         (drawer content, transcript chunk, note) and returns a compressed
         symbolic representation.
 

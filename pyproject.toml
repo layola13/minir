@@ -3,9 +3,9 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mempalace"
+name = "mimir"
 version = "3.0.0"
-description = "Give your AI a memory — mine projects and conversations into a searchable palace. No API key required."
+description = "Pure Python Skeleton Memory System — Fast, local, long-term memory for AI agents."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
@@ -13,8 +13,8 @@ authors = [
     {name = "milla-jovovich"},
 ]
 keywords = [
-    "ai", "memory", "llm", "rag", "qdrant", "mcp",
-    "vector-database", "claude", "chatgpt", "embeddings",
+    "ai", "memory", "llm", "skeleton", "mcp",
+    "context-window", "long-term-memory", "local-first",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -29,20 +29,20 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "qdrant-client>=1.9.0",
     "pyyaml>=6.0",
+    "autocorrect>=2.6.1",
 ]
 
 [project.urls]
-Homepage = "https://github.com/milla-jovovich/mempalace"
-Repository = "https://github.com/milla-jovovich/mempalace"
-"Bug Tracker" = "https://github.com/milla-jovovich/mempalace/issues"
+Homepage = "https://github.com/milla-jovovich/mimir"
+Repository = "https://github.com/milla-jovovich/mimir"
+"Bug Tracker" = "https://github.com/milla-jovovich/mimir/issues"
 
 [tool.setuptools.packages.find]
-include = ["mempalace*"]
+include = ["mimir*"]
 
 [project.scripts]
-mempalace = "mempalace:main"
+mimir = "mimir.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "build>=1.0", "twine>=4.0"]

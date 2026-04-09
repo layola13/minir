@@ -1,6 +1,6 @@
 # Fast MCP benchmark checkpoint
 
-This document records the current verified state of the skeleton-backed `mempalace_fast_*` benchmark work, with direct side-by-side comparison against the legacy MCP path.
+This document records the current verified state of the skeleton-backed `mimir_fast_*` benchmark work, with direct side-by-side comparison against the legacy MCP path.
 
 ## What is already working
 
@@ -139,8 +139,8 @@ So the fast path is currently best understood as:
 
 The following work is already done:
 
-- `mempalace_fast_*` MCP tools added to `mempalace/mcp_server.py`
-- `mempalace/skeleton_search.py` added as the fast skeleton query layer
+- `mimir_fast_*` MCP tools added to `mimir/mcp_server.py`
+- `mimir/skeleton_search.py` added as the fast skeleton query layer
 - AST-based parsing improved for generated skeleton files
 - transcript caveat noise filtered out of task description extraction
 - in-process caching added for repeated skeleton reads and aggregate computations

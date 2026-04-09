@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-normalize.py — Convert any chat export format to MemPalace transcript format.
+normalize.py — Convert any chat export format to Mimir transcript format.
 
 Supported:
     - Plain text with > markers (pass through)
@@ -212,7 +212,7 @@ def _messages_to_transcript(messages: list, spellcheck: bool = True) -> str:
     """Convert [(role, text), ...] to transcript format with > markers."""
     if spellcheck:
         try:
-            from mempalace.spellcheck import spellcheck_user_text
+            from mimir.spellcheck import spellcheck_user_text
 
             _fix = spellcheck_user_text
         except Exception:

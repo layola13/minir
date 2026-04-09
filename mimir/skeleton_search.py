@@ -8,7 +8,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .conversation_skeleton import _extract_tokens, index_output_path, skeleton_output_path
+from mimir.conversation_skeleton import _extract_tokens, index_output_path, skeleton_output_path
 
 _MODULE_CACHE: dict[tuple[str, int, int], ast.Module | None] = {}
 _LITERAL_CACHE: dict[tuple[str, int, int, str], object] = {}
@@ -1148,15 +1148,15 @@ def _write_fast_native_package(
 
     init_text = "\n".join(
         [
-            "from .summary import SNAPSHOT_NAME, TASK_DESCRIPTION, TASK_TOPICS, snapshot_overview",
-            "from .nodes import MemoryNode, NODES",
-            "from .topics import TopicCluster, TOPIC_CLUSTERS",
-            "from .files import FileReference, FILE_REFERENCES",
-            "from .patterns import PatternGroup, REPEATED_PATTERNS",
-            "from .edges import RelationGraph",
-            "from .drawers import DrawerRecord, DRAWERS",
-            "from .diary import DiaryEntry, DIARY_ENTRIES",
-            "from .kg import KGTriple, KG_TRIPLES",
+            "from mimir.summary import SNAPSHOT_NAME, TASK_DESCRIPTION, TASK_TOPICS, snapshot_overview",
+            "from mimir.nodes import MemoryNode, NODES",
+            "from mimir.topics import TopicCluster, TOPIC_CLUSTERS",
+            "from mimir.files import FileReference, FILE_REFERENCES",
+            "from mimir.patterns import PatternGroup, REPEATED_PATTERNS",
+            "from mimir.edges import RelationGraph",
+            "from mimir.drawers import DrawerRecord, DRAWERS",
+            "from mimir.diary import DiaryEntry, DIARY_ENTRIES",
+            "from mimir.kg import KGTriple, KG_TRIPLES",
             "",
             "graph = RelationGraph()",
             "",
@@ -1276,9 +1276,9 @@ def _write_fast_native_package(
         [
             "from __future__ import annotations",
             "",
-            "from .topics import TOPIC_CLUSTERS",
-            "from .files import FILE_REFERENCES",
-            "from .patterns import REPEATED_PATTERNS",
+            "from mimir.topics import TOPIC_CLUSTERS",
+            "from mimir.files import FILE_REFERENCES",
+            "from mimir.patterns import REPEATED_PATTERNS",
             "",
             "class RelationGraph:",
             f"    memory_count = {len(records)!r}",

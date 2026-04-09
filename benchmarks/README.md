@@ -5,8 +5,8 @@ Run the exact same benchmarks we report. Clone, install, run.
 ## Setup
 
 ```bash
-git clone -b ben/benchmarking https://github.com/aya-thekeeper/mempal.git
-cd mempal
+git clone -b ben/benchmarking https://github.com/aya-thekeeper/mimir.git
+cd mimir
 pip install chromadb pyyaml
 ```
 

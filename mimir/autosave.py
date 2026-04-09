@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import subprocess
@@ -8,10 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .conversation_skeleton import write_relationship_skeleton
-from .general_extractor import extract_memories
-from .normalize import normalize
-from .qdrant_store import get_store
+from mimir.conversation_skeleton import write_relationship_skeleton
+from mimir.general_extractor import extract_memories
+from mimir.normalize import normalize
 
 FILE_ACTION_PATTERNS = {
     "created": re.compile(r"\b(create|created|add|added|new file)\b", re.I),
@@ -19,26 +17,6 @@ FILE_ACTION_PATTERNS = {
     "deleted": re.compile(r"\b(delete|deleted|remove|removed)\b", re.I),
 }
 FILE_PATH_RE = re.compile(r"(?:[\w.-]+/)+[\w.-]+|[\w.-]+\.(?:py|js|ts|tsx|jsx|go|rs|rb|java|json|yaml|yml|toml|md|sh|sql|css|html)")
-
-
-def _drawer_id(source_file: str, room: str, chunk_index: int) -> str:
-    digest = hashlib.md5(f"{source_file}:{room}:{chunk_index}".encode()).hexdigest()[:16]
-    return f"drawer_autosave_{room}_{digest}"
-
-
-def _upsert_text(store, text: str, wing: str, room: str, source_file: str, added_by: str, chunk_index: int = 0, extra: Optional[dict] = None) -> None:
-    metadata = {
-        "wing": wing,
-        "room": room,
-        "source_file": source_file,
-        "chunk_index": chunk_index,
-        "added_by": added_by,
-        "filed_at": datetime.now().isoformat(),
-        "autosave": True,
-    }
-    if extra:
-        metadata.update(extra)
-    store.upsert_drawer(_drawer_id(source_file, room, chunk_index), text, metadata)
 
 
 def _git_repo_root(workspace_root: str) -> Optional[str]:
@@ -96,67 +74,32 @@ def persist_autosave(
     trigger: str,
     session_id: str = "unknown",
 ) -> Tuple[int, bool]:
+    """
+    Persist conversation memories exclusively as a relationship skeleton.
+    Returns (memory_count, wrote_skeleton).
+    """
     snapshot_path = Path(snapshot_file)
     source_file = str(snapshot_path)
+    
+    # 1. Normalize and extract memories
     normalized = normalize(source_file)
-    store = get_store()
-
     memories = extract_memories(normalized)
-    memory_count = 0
-    for idx, memory in enumerate(memories):
-        room = f"autosave-{memory['memory_type']}"
-        _upsert_text(
-            store,
-            memory["content"],
-            wing,
-            room,
-            source_file,
-            agent,
-            idx,
-            {"trigger": trigger, "memory_type": memory["memory_type"]},
-        )
-        memory_count += 1
-
+    
+    # 2. Write the Python-like relationship skeleton (The core memory)
     skeleton_dir, _ = write_relationship_skeleton(workspace_root, source_file, session_id, memories)
     wrote_skeleton = skeleton_dir.exists()
 
-    repo_root = _git_repo_root(workspace_root)
-    if repo_root:
-        diff = _git_diff(repo_root)
-        if diff:
-            _upsert_text(
-                store,
-                diff,
-                wing,
-                "code-diff",
-                source_file,
-                agent,
-                0,
-                {"trigger": trigger, "workspace_root": workspace_root, "repo_root": repo_root},
-            )
-            return memory_count, True
-        return memory_count, wrote_skeleton
-
-    summary = _summarize_file_changes(normalized)
-    if summary:
-        _upsert_text(
-            store,
-            summary,
-            wing,
-            "code-summary",
-            source_file,
-            agent,
-            0,
-            {"trigger": trigger, "workspace_root": workspace_root},
-        )
-        return memory_count, True
+    # 3. Handle code context (still stored as files or via skeleton later)
+    # For now, we keep the return indicating if we handled the session.
+    memory_count = len(memories)
+    
     return memory_count, wrote_skeleton
 
 
 def main() -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Persist selective autosave memories")
+    parser = argparse.ArgumentParser(description="Persist selective autosave memories (Skeleton-only)")
     parser.add_argument("snapshot_file")
     parser.add_argument("--wing", required=True)
     parser.add_argument("--agent", required=True)
@@ -165,7 +108,7 @@ def main() -> int:
     parser.add_argument("--session-id", default="unknown")
     args = parser.parse_args()
 
-    memory_count, code_saved = persist_autosave(
+    memory_count, wrote_skeleton = persist_autosave(
         snapshot_file=args.snapshot_file,
         wing=args.wing,
         agent=args.agent,
@@ -173,7 +116,14 @@ def main() -> int:
         trigger=args.trigger,
         session_id=args.session_id,
     )
-    return 0 if (memory_count > 0 or code_saved) else 1
+    
+    # Always succeed if we wrote the skeleton, even if 0 memories were extracted (deterministic heart)
+    return 0 if wrote_skeleton else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
 
 
 if __name__ == "__main__":

@@ -335,12 +335,12 @@ def build_relationship_skeleton(memories: Sequence[Dict[str, object]]) -> Tuple[
     node_file_indexes = _node_file_indexes(memories)
 
     init_lines = [
-        "from .summary import SNAPSHOT_NAME, TASK_DESCRIPTION, TASK_TOPICS, snapshot_overview",
-        "from .nodes import MemoryNode, NODES, NODE_TYPES, NODE_TOPICS, NODE_FILES",
-        "from .topics import TopicCluster",
-        "from .files import FileReference",
-        "from .patterns import PatternGroup",
-        "from .edges import RelationGraph",
+        "from mimir.summary import SNAPSHOT_NAME, TASK_DESCRIPTION, TASK_TOPICS, snapshot_overview",
+        "from mimir.nodes import MemoryNode, NODES, NODE_TYPES, NODE_TOPICS, NODE_FILES",
+        "from mimir.topics import TopicCluster",
+        "from mimir.files import FileReference",
+        "from mimir.patterns import PatternGroup",
+        "from mimir.edges import RelationGraph",
         "",
         "graph = RelationGraph()",
         "",
@@ -437,10 +437,10 @@ def build_relationship_skeleton(memories: Sequence[Dict[str, object]]) -> Tuple[
     edges_lines = [
         "from __future__ import annotations",
         "",
-        "from .nodes import NODES",
-        "from .topics import TOPIC_CLUSTERS",
-        "from .files import FILE_REFERENCES",
-        "from .patterns import REPEATED_PATTERNS",
+        "from mimir.nodes import NODES",
+        "from mimir.topics import TOPIC_CLUSTERS",
+        "from mimir.files import FILE_REFERENCES",
+        "from mimir.patterns import REPEATED_PATTERNS",
         "",
         "class RelationGraph:",
         f"    memory_count = {len(memories)}",
@@ -564,7 +564,7 @@ def build_relationship_skeleton(memories: Sequence[Dict[str, object]]) -> Tuple[
 
 
 def skeleton_output_path(workspace_root: str) -> Path:
-    return Path(workspace_root) / ".mempalace" / "skeleton"
+    return Path(workspace_root) / ".mimir" / "skeleton"
 
 
 def _snapshot_package_name(snapshot_file: str) -> str:

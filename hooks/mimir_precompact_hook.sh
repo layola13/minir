@@ -1,11 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-STATE_DIR="$HOME/.mempalace/hook_state"
+STATE_DIR="$HOME/.mimir/hook_state"
 SNAPSHOT_ROOT="$STATE_DIR/transcript_snapshots"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MEMPAL_WING="${MEMPAL_WING:-wing_claude_code}"
-MEMPAL_AGENT="${MEMPAL_AGENT:-mempalace_hook}"
+MEMPAL_AGENT="${MEMPAL_AGENT:-mimir_hook}"
 WORKSPACE_ROOT="${CLAUDE_PROJECT_DIR:-$REPO_DIR}"
 mkdir -p "$STATE_DIR" "$SNAPSHOT_ROOT"
 
@@ -25,7 +25,7 @@ if [ ! -f "$TRANSCRIPT_PATH" ]; then
     cat <<'HOOKJSON'
 {
   "decision": "block",
-  "reason": "PreCompact auto-save could not run because the transcript file was unavailable. Save this session to MemPalace manually before compaction continues."
+  "reason": "PreCompact auto-save could not run because the transcript file was unavailable. Save this session to Mimir manually before compaction continues."
 }
 HOOKJSON
     exit 0
@@ -38,12 +38,12 @@ mkdir -p "$SESSION_DIR"
 cp "$TRANSCRIPT_PATH" "$SNAPSHOT_FILE"
 
 set +e
-PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -m mempalace.autosave "$SNAPSHOT_FILE" --wing "$MEMPAL_WING" --agent "$MEMPAL_AGENT" --workspace-root "$WORKSPACE_ROOT" --trigger precompact --session-id "$SESSION_ID" >> "$STATE_DIR/hook.log" 2>&1
+PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -m mimir.autosave "$SNAPSHOT_FILE" --wing "$MEMPAL_WING" --agent "$MEMPAL_AGENT" --workspace-root "$WORKSPACE_ROOT" --trigger precompact --session-id "$SESSION_ID" >> "$STATE_DIR/hook.log" 2>&1
 AUTOSAVE_EXIT=$?
 set -e
 
 SNAPSHOT_STEM="$(basename "$SNAPSHOT_FILE" .jsonl)"
-EXPECTED_SKELETON_DIR="$WORKSPACE_ROOT/.mempalace/skeleton/snapshot_${SNAPSHOT_STEM}"
+EXPECTED_SKELETON_DIR="$WORKSPACE_ROOT/.mimir/skeleton/snapshot_${SNAPSHOT_STEM}"
 
 if [ "$AUTOSAVE_EXIT" -eq 0 ] && [ -d "$EXPECTED_SKELETON_DIR" ]; then
     log_line "PRE-COMPACT auto-save persisted successfully (exit=$AUTOSAVE_EXIT) -> $SNAPSHOT_FILE"
@@ -56,7 +56,7 @@ else
     cat <<HOOKJSON
 {
   "decision": "block",
-  "reason": "PreCompact selective autosave failed after snapshotting $SNAPSHOT_FILE. Check ~/.mempalace/hook_state/hook.log and save manually before compaction continues."
+  "reason": "PreCompact selective autosave failed after snapshotting $SNAPSHOT_FILE. Check ~/.mimir/hook_state/hook.log and save manually before compaction continues."
 }
 HOOKJSON
 fi

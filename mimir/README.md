@@ -1,13 +1,13 @@
-# mempalace/ — Core Package
+# mimir/ — Core Package
 
-The Python package that powers MemPalace. All modules, all logic.
+The Python package that powers Mimir. All modules, all logic.
 
 ## Modules
 
 | Module | What it does |
 |--------|-------------|
 | `cli.py` | CLI entry point — routes to mine, search, init, compress, wake-up |
-| `config.py` | Configuration loading — `~/.mempalace/config.json`, env vars, defaults |
+| `config.py` | Configuration loading — `~/.mimir/config.json`, env vars, defaults |
 | `normalize.py` | Converts 5 chat formats (Claude Code JSONL, Claude.ai JSON, ChatGPT JSON, Slack JSON, plain text) to standard transcript format |
 | `miner.py` | Project file ingest — scans directories, chunks by paragraph, stores to ChromaDB |
 | `convo_miner.py` | Conversation ingest — chunks by exchange pair (Q+A), detects rooms from content |

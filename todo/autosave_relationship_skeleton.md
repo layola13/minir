@@ -7,8 +7,8 @@
 - Export the relationship result as a deterministic Python-like skeleton.
 
 ## Scope
-1. Keep current hook flow in `hooks/mempal_save_hook.sh` and `hooks/mempal_precompact_hook.sh`.
-2. Keep `mempalace/autosave.py` as the autosave entry point.
+1. Keep current hook flow in `hooks/mimir_save_hook.sh` and `hooks/mimir_precompact_hook.sh`.
+2. Keep `mimir/autosave.py` as the autosave entry point.
 3. Reuse extracted conversation memories from `extract_memories(...)`.
 4. Build lightweight relationships only:
    - `same_topic_as`
@@ -72,7 +72,7 @@
 ### Local skeleton fast MCP remaining work
 
 #### 1. Search behavior should be correct for the local skeleton model
-- `mempalace_fast_search` should optimize for deterministic local retrieval, not imitate vector search.
+- `mimir_fast_search` should optimize for deterministic local retrieval, not imitate vector search.
 - Progress so far:
   - stable result shape is in place
   - ranking now prefers direct preview/task/file hits more consistently
@@ -83,7 +83,7 @@
   - decide whether current `similarity` should stay as a generic local score or be renamed later for clarity
 
 #### 2. Duplicate detection should be correct for the local skeleton model
-- `mempalace_fast_check_duplicate` should use deterministic local duplicate logic, not vector similarity semantics.
+- `mimir_fast_check_duplicate` should use deterministic local duplicate logic, not vector similarity semantics.
 - Progress so far:
   - threshold filtering is enforced in fast duplicate checks
   - match ordering and truncation are normalized more consistently
