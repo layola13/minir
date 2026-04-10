@@ -3,9 +3,11 @@ from __future__ import annotations
 import ast
 import json
 from collections import Counter, defaultdict
+from datetime import datetime
 from itertools import combinations
 from pathlib import Path
 import re
+import shutil
 from typing import Dict, List, Sequence, Tuple
 
 FILE_PATH_RE = re.compile(r"(?:[\w.-]+/)+[\w.-]+|[\w.-]+\.(?:py|js|ts|tsx|jsx|go|rs|rb|java|json|yaml|yml|toml|md|sh|sql|css|html)")
@@ -91,6 +93,7 @@ STOPWORDS = {
     "want",
     "with",
 }
+SESSION_ID_SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def _is_noise_message(text: str) -> bool:
@@ -247,7 +250,8 @@ def _extract_session_messages(snapshot_file: str) -> List[dict]:
     snapshot_path = Path(snapshot_file)
     if not snapshot_path.exists():
         return messages
-    for line in snapshot_path.read_text(encoding="utf-8").splitlines():
+    raw_text = snapshot_path.read_text(encoding="utf-8")
+    for line in raw_text.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -270,6 +274,35 @@ def _extract_session_messages(snapshot_file: str) -> List[dict]:
             continue
         normalized_role = "user" if role in {"user", "human"} else "assistant"
         messages.append({"role": normalized_role, "content": text})
+    if messages:
+        return messages
+
+    # Fallback: plain transcript format (`> user` lines plus assistant text).
+    pending_assistant: List[str] = []
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            if pending_assistant:
+                assistant_text = " ".join(pending_assistant).strip()
+                if assistant_text and not _is_noise_message(assistant_text):
+                    messages.append({"role": "assistant", "content": assistant_text})
+                pending_assistant = []
+            continue
+        if stripped.startswith(">"):
+            if pending_assistant:
+                assistant_text = " ".join(pending_assistant).strip()
+                if assistant_text and not _is_noise_message(assistant_text):
+                    messages.append({"role": "assistant", "content": assistant_text})
+                pending_assistant = []
+            user_text = stripped[1:].strip()
+            if user_text and not _is_noise_message(user_text):
+                messages.append({"role": "user", "content": user_text})
+        else:
+            pending_assistant.append(stripped)
+    if pending_assistant:
+        assistant_text = " ".join(pending_assistant).strip()
+        if assistant_text and not _is_noise_message(assistant_text):
+            messages.append({"role": "assistant", "content": assistant_text})
     return messages
 
 
@@ -566,17 +599,117 @@ def skeleton_output_path(workspace_root: str) -> Path:
     return Path(workspace_root) / ".mimir" / "skeleton"
 
 
+def snapshots_output_path(workspace_root: str) -> Path:
+    return skeleton_output_path(workspace_root) / "snapshots"
+
+
+def sessions_output_path(workspace_root: str) -> Path:
+    return skeleton_output_path(workspace_root) / "sessions"
+
+
+def _ensure_skeleton_layout(root_dir: Path) -> None:
+    snapshots_dir = root_dir / "snapshots"
+    sessions_dir = root_dir / "sessions"
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    for legacy in sorted(root_dir.glob("snapshot_*")):
+        if not legacy.is_dir():
+            continue
+        target = snapshots_dir / legacy.name
+        if target.exists():
+            continue
+        shutil.move(str(legacy), str(target))
+
+
 def _snapshot_package_name(snapshot_file: str) -> str:
     return f"snapshot_{Path(snapshot_file).stem}"
 
 
 def snapshot_skeleton_output_path(workspace_root: str, snapshot_file: str) -> Path:
     snapshot_name = _snapshot_package_name(snapshot_file)
-    return skeleton_output_path(workspace_root) / snapshot_name
+    return snapshots_output_path(workspace_root) / snapshot_name
 
 
 def index_output_path(workspace_root: str) -> Path:
     return skeleton_output_path(workspace_root) / "__index__.py"
+
+
+def _safe_session_id(session_id: str) -> str:
+    cleaned = SESSION_ID_SAFE_RE.sub("_", (session_id or "").strip())
+    return cleaned or "unknown"
+
+
+def session_summary_output_path(workspace_root: str, session_id: str) -> Path:
+    return sessions_output_path(workspace_root) / f"{_safe_session_id(session_id)}.py"
+
+
+def _write_session_summary(
+    workspace_root: str,
+    session_id: str,
+    snapshot_name: str,
+    task_description: str,
+    task_topics: Sequence[str],
+) -> None:
+    output_path = session_summary_output_path(workspace_root, session_id)
+    existing_snapshots = _read_literal_assignment(output_path, "SNAPSHOTS", [])
+    snapshots = [str(item) for item in existing_snapshots if str(item).strip()]
+    if snapshot_name not in snapshots:
+        snapshots.append(snapshot_name)
+
+    topic_values = [str(item) for item in task_topics if str(item).strip()]
+    updated_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    lines = [
+        "from __future__ import annotations",
+        "",
+        f"SESSION_ID = {_quoted(session_id)}",
+        f"SNAPSHOTS = {snapshots!r}",
+        f"LATEST_SNAPSHOT = {snapshots[-1] if snapshots else None!r}",
+        f"LATEST_TASK_DESCRIPTION = {_quoted(task_description)}",
+        f"LATEST_TASK_TOPICS = {topic_values!r}",
+        f"UPDATED_AT = {_quoted(updated_at)}",
+        "",
+        "def session_overview() -> dict:",
+        "    return {",
+        "        'session_id': SESSION_ID,",
+        "        'snapshots': list(SNAPSHOTS),",
+        "        'latest_snapshot': LATEST_SNAPSHOT,",
+        "        'latest_task_description': LATEST_TASK_DESCRIPTION,",
+        "        'latest_task_topics': list(LATEST_TASK_TOPICS),",
+        "        'updated_at': UPDATED_AT,",
+        "    }",
+        "",
+    ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _session_summaries(root_dir: Path) -> List[dict]:
+    sessions_dir = root_dir / "sessions"
+    if not sessions_dir.exists():
+        return []
+    records: List[dict] = []
+    for file_path in sorted(sessions_dir.glob("*.py")):
+        if file_path.name == "__index__.py":
+            continue
+        session_id = str(_read_literal_assignment(file_path, "SESSION_ID", file_path.stem))
+        snapshots = [str(item) for item in _read_literal_assignment(file_path, "SNAPSHOTS", [])]
+        latest_snapshot = _read_literal_assignment(file_path, "LATEST_SNAPSHOT", snapshots[-1] if snapshots else None)
+        latest_task_description = str(_read_literal_assignment(file_path, "LATEST_TASK_DESCRIPTION", ""))
+        latest_task_topics = [str(item) for item in _read_literal_assignment(file_path, "LATEST_TASK_TOPICS", [])]
+        updated_at = str(_read_literal_assignment(file_path, "UPDATED_AT", ""))
+        records.append(
+            {
+                "session_id": session_id,
+                "summary_module": f"sessions.{file_path.stem}",
+                "snapshots": snapshots,
+                "latest_snapshot": latest_snapshot,
+                "latest_task_description": latest_task_description,
+                "latest_task_topics": latest_task_topics,
+                "updated_at": updated_at,
+            }
+        )
+    records.sort(key=lambda item: (str(item.get("updated_at", "")), str(item.get("session_id", ""))))
+    return records
 
 
 def _build_package(preview: str) -> Dict[str, str]:
@@ -624,9 +757,10 @@ def _snapshot_summary(snapshot_dir: Path) -> dict:
     task_topics = _read_literal_assignment(summary_path, "TASK_TOPICS", [])
     top_topics = sorted(node_topics, key=lambda item: (-len(node_topics[item]), item))[:3]
     top_files = sorted(node_files, key=lambda item: (-len(node_files[item]), item))[:3]
+    summary_module = f"{snapshot_dir.name}.summary" if summary_path.exists() else None
     return {
         "name": snapshot_dir.name,
-        "summary_module": f"{snapshot_dir.name}.summary",
+        "summary_module": summary_module,
         "nodes_module": f"{snapshot_dir.name}.nodes",
         "edges_module": f"{snapshot_dir.name}.edges",
         "memory_count": memory_count,
@@ -635,6 +769,7 @@ def _snapshot_summary(snapshot_dir: Path) -> dict:
         "task_topics": list(task_topics),
         "top_topics": top_topics,
         "top_files": top_files,
+        "mtime": int(snapshot_dir.stat().st_mtime),
     }
 
 
@@ -660,10 +795,35 @@ def _global_summary(snapshots: Sequence[dict]) -> dict:
     }
 
 
+def _snapshot_sort_key(snapshot_dir: Path) -> tuple[int, str]:
+    name = snapshot_dir.name
+    stem = name[len("snapshot_"):] if name.startswith("snapshot_") else name
+    match = re.search(r"(\d{8}_\d{6})", stem)
+    if match:
+        return (1, match.group(1))
+    rollout = re.search(r"rollout-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})", stem)
+    if rollout:
+        return (1, f"{rollout.group(1).replace('-', '')}_{rollout.group(2)}{rollout.group(3)}{rollout.group(4)}")
+    return (0, f"{int(snapshot_dir.stat().st_mtime)}_{name}")
+
+
 def _write_index(root_dir: Path) -> None:
-    snapshot_dirs = sorted(path for path in root_dir.iterdir() if path.is_dir()) if root_dir.exists() else []
+    _ensure_skeleton_layout(root_dir)
+    snapshots_dir = root_dir / "snapshots"
+    snapshot_dirs = sorted(
+        (path for path in snapshots_dir.iterdir() if path.is_dir()),
+        key=_snapshot_sort_key,
+    ) if snapshots_dir.exists() else []
     snapshots = [_snapshot_summary(path) for path in snapshot_dirs]
     latest_snapshot = snapshots[-1]["name"] if snapshots else None
+    sessions = _session_summaries(root_dir)
+    latest_session = None
+    if latest_snapshot is not None:
+        for session in sessions:
+            if latest_snapshot in session.get("snapshots", []):
+                latest_session = session["session_id"]
+    if latest_session is None and sessions:
+        latest_session = sessions[-1]["session_id"]
     global_summary = _global_summary(snapshots)
     lines = [
         "# __index__.py  (auto-generated navigation bus)",
@@ -684,6 +844,11 @@ def _write_index(root_dir: Path) -> None:
         f"SNAPSHOTS = {[item['name'] for item in snapshots]!r}",
         f"LATEST_SNAPSHOT = {latest_snapshot!r}",
         f"SNAPSHOT_SUMMARIES = {snapshots!r}",
+        "",
+        "# ── 3. Session Routing ─────────────────────────────────────────",
+        f"SESSIONS = {[item['session_id'] for item in sessions]!r}",
+        f"LATEST_SESSION = {latest_session!r}",
+        f"SESSION_SUMMARIES = {sessions!r}",
         "",
         "def available_snapshots() -> list[str]:",
         "    return list(SNAPSHOTS)",
@@ -739,6 +904,18 @@ def _write_index(root_dir: Path) -> None:
         "        return []",
         "    return list(summary['top_files'])",
         "",
+        "def available_sessions() -> list[str]:",
+        "    return list(SESSIONS)",
+        "",
+        "def latest_session() -> str | None:",
+        "    return LATEST_SESSION",
+        "",
+        "def session_summary_for(session_id: str) -> dict | None:",
+        "    for item in SESSION_SUMMARIES:",
+        "        if item['session_id'] == session_id:",
+        "            return dict(item)",
+        "    return None",
+        "",
         "def global_overview() -> dict:",
         "    return {",
         "        'snapshot_count': SNAPSHOT_COUNT,",
@@ -747,6 +924,8 @@ def _write_index(root_dir: Path) -> None:
         "        'global_top_files': list(GLOBAL_TOP_FILES),",
         "        'global_task_topics': list(GLOBAL_TASK_TOPICS),",
         "        'latest_snapshot': LATEST_SNAPSHOT,",
+        "        'session_count': len(SESSIONS),",
+        "        'latest_session': LATEST_SESSION,",
         "    }",
         "",
     ]
@@ -760,11 +939,20 @@ def write_relationship_skeleton(
     session_id: str,
     memories: Sequence[Dict[str, object]],
 ) -> Tuple[Path, dict]:
-    del session_id
     root_dir = skeleton_output_path(workspace_root)
+    _ensure_skeleton_layout(root_dir)
     output_dir = snapshot_skeleton_output_path(workspace_root, snapshot_file)
     preview, stats = build_relationship_skeleton(memories)
     package = _build_package(preview)
+    messages = _extract_session_messages(snapshot_file)
+    snapshot_name = _snapshot_package_name(snapshot_file)
     _write_package(output_dir, package)
+    _write_session_summary(
+        workspace_root=workspace_root,
+        session_id=session_id,
+        snapshot_name=snapshot_name,
+        task_description=_task_description(messages),
+        task_topics=_task_topics(messages, memories),
+    )
     _write_index(root_dir)
     return output_dir, stats

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import os
 import re
 import subprocess
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -80,11 +78,11 @@ def persist_autosave(
     """
     snapshot_path = Path(snapshot_file)
     source_file = str(snapshot_path)
-    
+
     # 1. Normalize and extract memories
     normalized = normalize(source_file)
     memories = extract_memories(normalized)
-    
+
     # 2. Write the Python-like relationship skeleton (The core memory)
     skeleton_dir, _ = write_relationship_skeleton(workspace_root, source_file, session_id, memories)
     wrote_skeleton = skeleton_dir.exists()
@@ -92,7 +90,7 @@ def persist_autosave(
     # 3. Handle code context (still stored as files or via skeleton later)
     # For now, we keep the return indicating if we handled the session.
     memory_count = len(memories)
-    
+
     return memory_count, wrote_skeleton
 
 
@@ -116,7 +114,7 @@ def main() -> int:
         trigger=args.trigger,
         session_id=args.session_id,
     )
-    
+
     # Always succeed if we wrote the skeleton, even if 0 memories were extracted (deterministic heart)
     return 0 if wrote_skeleton else 1
 

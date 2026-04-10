@@ -17,31 +17,14 @@ logger = logging.getLogger("mimir_mcp")
 
 try:
     from mimir.skeleton_search import (
-        add_drawer_fast,
-        delete_drawer_fast,
         diary_read_fast,
         diary_write_fast,
-        duplicate_all_fast,
-        find_tunnels_all_fast,
-        graph_stats_all_fast,
         kg_add_fast,
-        kg_invalidate_fast,
         kg_query_fast,
         kg_stats_fast,
-        kg_timeline_fast,
-        list_rooms_all_fast,
-        list_snapshots_all_fast,
-        list_wings_all_fast,
         load_index_all_fast,
-        neighbors_all_fast,
-        read_any_snapshot_module,
         search_all_fast,
         status_all_fast,
-        summary_for_any_snapshot,
-        taxonomy_all_fast,
-        top_files_all_fast,
-        top_topics_all_fast,
-        traverse_all_fast,
     )
     from mimir.autosave import persist_autosave
 except Exception as e:
@@ -184,7 +167,7 @@ TOOLS = {
     "mimir_autosave": {
         "description": "Persist conversation skeleton. Call this periodically.",
         "input_schema": {
-            "type": "object", 
+            "type": "object",
             "properties": {
                 "snapshot_file": {"type": "string", "description": "Path to the conversation transcript"},
                 "session_id": {"type": "string"},

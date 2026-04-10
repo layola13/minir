@@ -153,25 +153,152 @@ TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
 SESSION_DIR="$SNAPSHOT_ROOT/$SESSION_ID"
 SNAPSHOT_FILE="$SESSION_DIR/${TIMESTAMP}_stop.jsonl"
 mkdir -p "$SESSION_DIR"
-cp "$TRANSCRIPT_PATH" "$SNAPSHOT_FILE"
+
+# Build a compact transcript (last SAVE_INTERVAL user turns) to keep hook latency low.
+if python3 - "$TRANSCRIPT_PATH" "$SNAPSHOT_FILE" "$SAVE_INTERVAL" >> "$STATE_DIR/hook.log" 2>&1 <<'PY'
+import json
+import sys
+
+transcript_path = sys.argv[1]
+snapshot_path = sys.argv[2]
+save_interval = int(sys.argv[3])
+
+messages = []
+codex_message_found = False
+
+def extract_text(content):
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item.strip())
+            elif isinstance(item, dict):
+                value = item.get("text")
+                if value is None:
+                    value = item.get("input", "")
+                if value:
+                    parts.append(str(value).strip())
+        return " ".join(part for part in parts if part).strip()
+    if isinstance(content, dict):
+        value = content.get("text")
+        if value is None:
+            value = content.get("input", "")
+        return str(value).strip()
+    return ""
+
+def is_noise(text):
+    if not text:
+        return True
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if "<command-message>" in stripped:
+        return True
+    if stripped.startswith("<environment_context>"):
+        return True
+    return False
+
+with open(transcript_path, encoding="utf-8", errors="replace") as f:
+    for raw in f:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            entry = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(entry, dict):
+            continue
+
+        # Claude format.
+        msg = entry.get("message")
+        if isinstance(msg, dict):
+            role = msg.get("role")
+            if role in {"user", "human", "assistant"}:
+                text = extract_text(msg.get("content", ""))
+                if not is_noise(text):
+                    normalized_role = "user" if role in {"user", "human"} else "assistant"
+                    messages.append((normalized_role, text))
+                continue
+
+        # Codex format.
+        if entry.get("type") == "response_item":
+            payload = entry.get("payload", {})
+            if isinstance(payload, dict) and payload.get("type") == "message":
+                role = payload.get("role")
+                if role in {"user", "assistant"}:
+                    text = extract_text(payload.get("content", ""))
+                    if not is_noise(text):
+                        messages.append((role, text))
+                        codex_message_found = True
+            continue
+
+trimmed = []
+users_seen = 0
+for role, text in reversed(messages):
+    trimmed.append((role, text))
+    if role == "user":
+        users_seen += 1
+        if users_seen >= save_interval:
+            break
+trimmed.reverse()
+
+while trimmed and trimmed[0][0] != "user":
+    trimmed.pop(0)
+
+lines = []
+i = 0
+while i < len(trimmed):
+    role, text = trimmed[i]
+    if role == "user":
+        lines.append(f"> {text}")
+        if i + 1 < len(trimmed) and trimmed[i + 1][0] == "assistant":
+            lines.append(trimmed[i + 1][1])
+            i += 2
+        else:
+            i += 1
+    else:
+        lines.append(text)
+        i += 1
+    lines.append("")
+
+with open(snapshot_path, "w", encoding="utf-8") as out:
+    out.write("\n".join(lines).strip() + "\n")
+
+print(f"messages_total={len(messages)} trimmed={len(trimmed)} codex_message_found={codex_message_found}", file=sys.stderr)
+PY
+then
+    log_line "Prepared compact snapshot: $SNAPSHOT_FILE"
+else
+    cp "$TRANSCRIPT_PATH" "$SNAPSHOT_FILE"
+    log_line "Compact snapshot build failed, fallback to full transcript copy: $SNAPSHOT_FILE"
+fi
 
 # ... (previous setup code)
 log_line "TRIGGERING SKELETON SAVE at exchange $EXCHANGE_COUNT -> $SNAPSHOT_FILE"
 
+START_MS=$(python3 -c "import time; print(int(time.time() * 1000))" 2>/dev/null || echo 0)
 set +e
 PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 -m mimir.autosave "$SNAPSHOT_FILE" --wing "$MEMPAL_WING" --agent "$MEMPAL_AGENT" --workspace-root "$WORKSPACE_ROOT" --trigger stop --session-id "$SESSION_ID" >> "$STATE_DIR/hook.log" 2>&1
 AUTOSAVE_EXIT=$?
 set -e
+END_MS=$(python3 -c "import time; print(int(time.time() * 1000))" 2>/dev/null || echo 0)
+ELAPSED_MS=0
+if [ "$END_MS" -ge "$START_MS" ]; then
+    ELAPSED_MS=$((END_MS - START_MS))
+fi
 
 if [ "$AUTOSAVE_EXIT" -eq 0 ]; then
     # Update last save marker even if 0 memories extracted, because the skeleton was successfully processed.
     if ! printf '%s\n' "$EXCHANGE_COUNT" > "$LAST_SAVE_FILE"; then
         log_line "SKELETON SAVE succeeded but failed to update last save marker: $LAST_SAVE_FILE"
     fi
-    log_line "SKELETON SAVE persisted successfully (exit=$AUTOSAVE_EXIT)"
+    log_line "SKELETON SAVE persisted successfully (exit=$AUTOSAVE_EXIT, elapsed_ms=$ELAPSED_MS)"
     echo "{}"
 else
-    log_line "SKELETON SAVE failed (exit=$AUTOSAVE_EXIT) after snapshotting $SNAPSHOT_FILE"
+    log_line "SKELETON SAVE failed (exit=$AUTOSAVE_EXIT, elapsed_ms=$ELAPSED_MS) after snapshotting $SNAPSHOT_FILE"
     cat <<HOOKJSON
 {
   "decision": "block",

@@ -8,12 +8,9 @@ Commands:
     mimir wake-up                     Show wake-up context from skeleton
 """
 
-import os
-import sys
 import argparse
 from pathlib import Path
 
-from mimir.config import MempalaceConfig
 from mimir.skeleton_search import (
     status_all_fast,
     search_all_fast,
@@ -23,7 +20,7 @@ from mimir.skeleton_search import (
 def cmd_status(args):
     workspace = str(Path.cwd())
     res = status_all_fast(workspace)
-    print(f"\nMimir Skeleton Status:")
+    print("\nMimir Skeleton Status:")
     print(f"  Total Drawers: {res.get('total_drawers', 0)}")
     if res.get('wings'):
         print(f"  Wings: {len(res['wings'])}")
@@ -43,7 +40,7 @@ def cmd_wakeup(args):
     if not index.get("exists"):
         print("No skeleton index found. Run some autosaves first.")
         return
-    
+
     print("\nMimir Wake-up Context:")
     print("=" * 50)
     print(f"Latest Snapshot: {index.get('latest_snapshot')}")
@@ -56,12 +53,12 @@ def main():
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("status", help="Show skeleton status")
-    
+
     p_search = sub.add_parser("search", help="Search the skeleton")
     p_search.add_argument("query", help="What to search for")
     p_search.add_argument("--results", type=int, default=5, help="Number of results")
 
-    p_wakeup = sub.add_parser("wake-up", help="Show wake-up context")
+    sub.add_parser("wake-up", help="Show wake-up context")
 
     args = parser.parse_args()
     if not args.command:

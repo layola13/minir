@@ -121,7 +121,12 @@ def _read_constructor_list(file_path: Path, name: str) -> List[dict]:
 
 
 def _snapshot_dir(workspace_root: str, snapshot: str) -> Path:
-    return skeleton_output_path(workspace_root) / snapshot
+    root = skeleton_output_path(workspace_root)
+    preferred = root / "snapshots" / snapshot
+    if preferred.exists():
+        return preferred
+    legacy = root / snapshot
+    return legacy
 
 
 
@@ -1282,9 +1287,9 @@ def _write_fast_native_package(
             "",
             "class RelationGraph:",
             f"    memory_count = {len(records)!r}",
-            f"    topic_clusters = TOPIC_CLUSTERS",
-            f"    file_references = FILE_REFERENCES",
-            f"    repeated_patterns = REPEATED_PATTERNS",
+            "    topic_clusters = TOPIC_CLUSTERS",
+            "    file_references = FILE_REFERENCES",
+            "    repeated_patterns = REPEATED_PATTERNS",
             f"    co_occurrences = {co_occurrences!r}",
             f"    hard_edges = {hard_edges!r}",
             "",
