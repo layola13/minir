@@ -39,6 +39,7 @@ PALACE_PROTOCOL = """IMPORTANT — Mimir Memory Protocol:
 
 AAAK_SPEC = """AAAK Dialect: Compact human/LLM-readable memory."""
 
+
 def _elapsed_ms(start: float) -> float:
     return round((time.perf_counter() - start) * 1000, 3)
 
@@ -111,14 +112,33 @@ def _read_request() -> Optional[Tuple[Dict[str, Any], str]]:
             logger.error(f"RPC Parse Error: {e}")
             continue
 
+
 # ── CORE WRAPPERS ─────────────────────────────────────────────────────────────
 
-def tool_status(): return tool_fast_status()
-def tool_search(**kwargs): return tool_fast_search(**kwargs)
-def tool_kg_query(**kwargs): return tool_fast_kg_query(**kwargs)
-def tool_kg_add(**kwargs): return tool_fast_kg_add(**kwargs)
-def tool_diary_write(**kwargs): return tool_fast_diary_write(**kwargs)
-def tool_diary_read(**kwargs): return tool_fast_diary_read(**kwargs)
+
+def tool_status():
+    return tool_fast_status()
+
+
+def tool_search(**kwargs):
+    return tool_fast_search(**kwargs)
+
+
+def tool_kg_query(**kwargs):
+    return tool_fast_kg_query(**kwargs)
+
+
+def tool_kg_add(**kwargs):
+    return tool_fast_kg_add(**kwargs)
+
+
+def tool_diary_write(**kwargs):
+    return tool_fast_diary_write(**kwargs)
+
+
+def tool_diary_read(**kwargs):
+    return tool_fast_diary_read(**kwargs)
+
 
 def tool_autosave(snapshot_file: str, session_id: str = "unknown", trigger: str = "manual"):
     try:
@@ -129,58 +149,146 @@ def tool_autosave(snapshot_file: str, session_id: str = "unknown", trigger: str 
             agent="mimir_mcp_server",
             workspace_root=workspace_root,
             trigger=trigger,
-            session_id=session_id
+            session_id=session_id,
         )
         return {
             "status": "success" if wrote_skeleton else "failed",
             "memories_extracted": memory_count,
-            "skeleton_written": wrote_skeleton
+            "skeleton_written": wrote_skeleton,
         }
     except Exception as e:
         logger.error(f"Autosave Error: {e}")
         return {"status": "error", "message": str(e)}
 
+
 # ── FAST IMPLEMENTATIONS ──────────────────────────────────────────────────────
+
 
 def tool_fast_status():
     res = status_all_fast(str(Path.cwd()))
     res.update({"protocol": PALACE_PROTOCOL, "aaak_dialect": AAAK_SPEC})
     return res
 
-def tool_fast_skeleton_index(): return load_index_all_fast(str(Path.cwd()))
-def tool_fast_search(query: str, limit: int = 5, wing: str = None, room: str = None): return search_all_fast(str(Path.cwd()), query=query, wing=wing, room=room, limit=limit)
-def tool_fast_kg_query(entity: str, as_of: str = None, direction: str = "both"): return kg_query_fast(str(Path.cwd()), entity=entity, as_of=as_of, direction=direction)
-def tool_fast_kg_add(subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None): return kg_add_fast(str(Path.cwd()), subject=subject, predicate=predicate, object=object, valid_from=valid_from, source_closet=source_closet)
-def tool_fast_kg_stats(): return kg_stats_fast(str(Path.cwd()))
-def tool_fast_diary_write(agent_name: str, entry: str, topic: str = "general"): return diary_write_fast(str(Path.cwd()), agent_name=agent_name, entry=entry, topic=topic)
-def tool_fast_diary_read(agent_name: str, last_n: int = 10): return diary_read_fast(str(Path.cwd()), agent_name=agent_name, last_n=last_n)
+
+def tool_fast_skeleton_index():
+    return load_index_all_fast(str(Path.cwd()))
+
+
+def tool_fast_search(query: str, limit: int = 5, wing: str = None, room: str = None):
+    return search_all_fast(str(Path.cwd()), query=query, wing=wing, room=room, limit=limit)
+
+
+def tool_fast_kg_query(entity: str, as_of: str = None, direction: str = "both"):
+    return kg_query_fast(str(Path.cwd()), entity=entity, as_of=as_of, direction=direction)
+
+
+def tool_fast_kg_add(
+    subject: str, predicate: str, object: str, valid_from: str = None, source_closet: str = None
+):
+    return kg_add_fast(
+        str(Path.cwd()),
+        subject=subject,
+        predicate=predicate,
+        object=object,
+        valid_from=valid_from,
+        source_closet=source_closet,
+    )
+
+
+def tool_fast_kg_stats():
+    return kg_stats_fast(str(Path.cwd()))
+
+
+def tool_fast_diary_write(agent_name: str, entry: str, topic: str = "general"):
+    return diary_write_fast(str(Path.cwd()), agent_name=agent_name, entry=entry, topic=topic)
+
+
+def tool_fast_diary_read(agent_name: str, last_n: int = 10):
+    return diary_read_fast(str(Path.cwd()), agent_name=agent_name, last_n=last_n)
+
 
 # ── TOOLS MAPPING ─────────────────────────────────────────────────────────────
 
 TOOLS = {
-    "mimir_status": {"description": "Palace status (Skeleton)", "input_schema": {"type": "object", "properties": {}}, "handler": tool_status},
-    "mimir_search": {"description": "Fast skeleton search", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]}, "handler": tool_search},
-    "mimir_kg_query": {"description": "Query skeleton KG", "input_schema": {"type": "object", "properties": {"entity": {"type": "string"}}, "required": ["entity"]}, "handler": tool_fast_kg_query},
-    "mimir_kg_add": {"description": "Add to skeleton KG", "input_schema": {"type": "object", "properties": {"subject": {"type": "string"}, "predicate": {"type": "string"}, "object": {"type": "string"}}, "required": ["subject", "predicate", "object"]}, "handler": tool_fast_kg_add},
-    "mimir_diary_write": {"description": "Write to skeleton diary", "input_schema": {"type": "object", "properties": {"agent_name": {"type": "string"}, "entry": {"type": "string"}}, "required": ["agent_name", "entry"]}, "handler": tool_diary_write},
-    "mimir_diary_read": {"description": "Read skeleton diary", "input_schema": {"type": "object", "properties": {"agent_name": {"type": "string"}}, "required": ["agent_name"]}, "handler": tool_diary_read},
+    "mimir_status": {
+        "description": "Palace status (Skeleton)",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_status,
+    },
+    "mimir_search": {
+        "description": "Fast skeleton search",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
+            "required": ["query"],
+        },
+        "handler": tool_search,
+    },
+    "mimir_kg_query": {
+        "description": "Query skeleton KG",
+        "input_schema": {
+            "type": "object",
+            "properties": {"entity": {"type": "string"}},
+            "required": ["entity"],
+        },
+        "handler": tool_fast_kg_query,
+    },
+    "mimir_kg_add": {
+        "description": "Add to skeleton KG",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string"},
+                "predicate": {"type": "string"},
+                "object": {"type": "string"},
+            },
+            "required": ["subject", "predicate", "object"],
+        },
+        "handler": tool_fast_kg_add,
+    },
+    "mimir_diary_write": {
+        "description": "Write to skeleton diary",
+        "input_schema": {
+            "type": "object",
+            "properties": {"agent_name": {"type": "string"}, "entry": {"type": "string"}},
+            "required": ["agent_name", "entry"],
+        },
+        "handler": tool_diary_write,
+    },
+    "mimir_diary_read": {
+        "description": "Read skeleton diary",
+        "input_schema": {
+            "type": "object",
+            "properties": {"agent_name": {"type": "string"}},
+            "required": ["agent_name"],
+        },
+        "handler": tool_diary_read,
+    },
     "mimir_autosave": {
         "description": "Persist conversation skeleton. Call this periodically.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "snapshot_file": {"type": "string", "description": "Path to the conversation transcript"},
+                "snapshot_file": {
+                    "type": "string",
+                    "description": "Path to the conversation transcript",
+                },
                 "session_id": {"type": "string"},
-                "trigger": {"type": "string", "default": "manual"}
+                "trigger": {"type": "string", "default": "manual"},
             },
-            "required": ["snapshot_file"]
+            "required": ["snapshot_file"],
         },
-        "handler": tool_autosave
+        "handler": tool_autosave,
     },
-    "mimir_skeleton_index": {"description": "Skeleton index", "input_schema": {"type": "object", "properties": {}}, "handler": tool_fast_skeleton_index},
+    "mimir_skeleton_index": {
+        "description": "Skeleton index",
+        "input_schema": {"type": "object", "properties": {}},
+        "handler": tool_fast_skeleton_index,
+    },
 }
 
 # ── JSON-RPC ──────────────────────────────────────────────────────────────────
+
 
 def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     method, params, req_id = request.get("method", ""), request.get("params", {}), request.get("id")
@@ -204,7 +312,11 @@ def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "id": req_id,
             "result": {
                 "tools": [
-                    {"name": name, "description": tool["description"], "inputSchema": tool["input_schema"]}
+                    {
+                        "name": name,
+                        "description": tool["description"],
+                        "inputSchema": tool["input_schema"],
+                    }
                     for name, tool in TOOLS.items()
                 ]
             },
@@ -212,7 +324,11 @@ def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if method == "tools/call":
         tool_name, tool_args = params.get("name"), params.get("arguments", {})
         if tool_name not in TOOLS:
-            return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"}}
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
+            }
         try:
             result = TOOLS[tool_name]["handler"](**tool_args)
             return {
@@ -223,7 +339,11 @@ def handle_request(request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         except Exception as e:
             logger.error(f"Tool execution error: {e}")
             return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
-    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": f"Unknown method: {method}"}}
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {"code": -32601, "message": f"Unknown method: {method}"},
+    }
 
 
 def main():
@@ -240,6 +360,7 @@ def main():
                 _write_response(response, response_mode)
         except Exception as e:
             logger.error(f"RPC Loop Error: {e}")
+
 
 if __name__ == "__main__":
     main()

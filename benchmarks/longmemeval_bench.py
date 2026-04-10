@@ -13,6 +13,7 @@ sys.path.append(os.getcwd())
 from mimir.autosave import persist_autosave
 from mimir.skeleton_search import search_all_fast, status_all_fast
 
+
 def benchmark_lme(data_file, limit=0):
     print(f"🧠 Mimir × LongMemEval Stress Test: {Path(data_file).name}")
 
@@ -44,7 +45,14 @@ def benchmark_lme(data_file, limit=0):
                     for turn in sess:
                         f.write(json.dumps({"message": turn}) + "\n")
 
-                persist_autosave(str(transcript_path), "bench", "bench", str(it_workspace), "stop", f"sess_{s_idx}")
+                persist_autosave(
+                    str(transcript_path),
+                    "bench",
+                    "bench",
+                    str(it_workspace),
+                    "stop",
+                    f"sess_{s_idx}",
+                )
             gen_ms = (time.perf_counter() - gen_start) * 1000
 
             # 2. Query Test
@@ -57,15 +65,17 @@ def benchmark_lme(data_file, limit=0):
             status_all_fast(str(it_workspace))
             stat_ms = (time.perf_counter() - s_start) * 1000
 
-            results["iterations"].append({
-                "id": q_id,
-                "gen_ms": round(gen_ms, 2),
-                "query_ms": round(q_ms, 2),
-                "status_ms": round(stat_ms, 2)
-            })
+            results["iterations"].append(
+                {
+                    "id": q_id,
+                    "gen_ms": round(gen_ms, 2),
+                    "query_ms": round(q_ms, 2),
+                    "status_ms": round(stat_ms, 2),
+                }
+            )
 
             if (idx + 1) % 10 == 0:
-                print(f"  Processed {idx+1}/{len(data)} | Last Query: {q_ms:5.2f}ms")
+                print(f"  Processed {idx + 1}/{len(data)} | Last Query: {q_ms:5.2f}ms")
 
     finally:
         shutil.rmtree(tmp_workspace, ignore_errors=True)
@@ -82,12 +92,13 @@ def benchmark_lme(data_file, limit=0):
         "avg_query_latency_ms": round(avg_query, 2),
         "avg_status_latency_ms": round(avg_status, 2),
         "total_time_s": round(total_elapsed, 2),
-        "throughput_qps": round(results["total_questions"] / total_elapsed, 2)
+        "throughput_qps": round(results["total_questions"] / total_elapsed, 2),
     }
     print(json.dumps(final_report, indent=2))
 
     with open("benchmarks/results_lme_perf.json", "w") as f:
         json.dump(final_report, f, indent=2)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

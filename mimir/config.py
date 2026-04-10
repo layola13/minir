@@ -22,10 +22,40 @@ DEFAULT_TOPIC_WINGS = [
 ]
 
 DEFAULT_HALL_KEYWORDS = {
-    "emotions": ["scared", "afraid", "worried", "happy", "sad", "love", "hate", "feel", "cry", "tears"],
-    "consciousness": ["consciousness", "conscious", "aware", "real", "genuine", "soul", "exist", "alive"],
+    "emotions": [
+        "scared",
+        "afraid",
+        "worried",
+        "happy",
+        "sad",
+        "love",
+        "hate",
+        "feel",
+        "cry",
+        "tears",
+    ],
+    "consciousness": [
+        "consciousness",
+        "conscious",
+        "aware",
+        "real",
+        "genuine",
+        "soul",
+        "exist",
+        "alive",
+    ],
     "memory": ["memory", "remember", "forget", "recall", "archive", "palace", "store"],
-    "technical": ["code", "python", "script", "bug", "error", "function", "api", "database", "server"],
+    "technical": [
+        "code",
+        "python",
+        "script",
+        "bug",
+        "error",
+        "function",
+        "api",
+        "database",
+        "server",
+    ],
     "identity": ["identity", "name", "who am i", "persona", "self"],
     "family": ["family", "kids", "children", "daughter", "son", "parent", "mother", "father"],
     "creative": ["game", "gameplay", "player", "app", "design", "art", "music", "story"],
@@ -36,9 +66,7 @@ class MempalaceConfig:
     """Configuration manager for Mimir Fast."""
 
     def __init__(self, config_dir=None):
-        self._config_dir = (
-            Path(config_dir) if config_dir else Path(os.path.expanduser("~/.mimir"))
-        )
+        self._config_dir = Path(config_dir) if config_dir else Path(os.path.expanduser("~/.mimir"))
         self._config_file = self._config_dir / "config.json"
         self._people_map_file = self._config_dir / "people_map.json"
         self._file_config = {}
@@ -61,11 +89,19 @@ class MempalaceConfig:
 
     @property
     def palace_path(self):
-        return self._get(["MIMIR_PALACE_PATH", "MIMIR_PALACE_PATH"], "palace_path", DEFAULT_PALACE_PATH)
+        return self._get(
+            ["MIMIR_PALACE_PATH", "MIMIR_PALACE_PATH"], "palace_path", DEFAULT_PALACE_PATH
+        )
 
     @property
     def request_timeout_seconds(self):
-        return int(self._get("MIMIR_REQUEST_TIMEOUT_SECONDS", "request_timeout_seconds", DEFAULT_REQUEST_TIMEOUT_SECONDS))
+        return int(
+            self._get(
+                "MIMIR_REQUEST_TIMEOUT_SECONDS",
+                "request_timeout_seconds",
+                DEFAULT_REQUEST_TIMEOUT_SECONDS,
+            )
+        )
 
     @property
     def people_map(self):

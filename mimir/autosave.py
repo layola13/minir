@@ -11,10 +11,14 @@ from mimir.normalize import normalize
 
 FILE_ACTION_PATTERNS = {
     "created": re.compile(r"\b(create|created|add|added|new file)\b", re.I),
-    "edited": re.compile(r"\b(edit|edited|modify|modified|update|updated|change|changed|patch)\b", re.I),
+    "edited": re.compile(
+        r"\b(edit|edited|modify|modified|update|updated|change|changed|patch)\b", re.I
+    ),
     "deleted": re.compile(r"\b(delete|deleted|remove|removed)\b", re.I),
 }
-FILE_PATH_RE = re.compile(r"(?:[\w.-]+/)+[\w.-]+|[\w.-]+\.(?:py|js|ts|tsx|jsx|go|rs|rb|java|json|yaml|yml|toml|md|sh|sql|css|html)")
+FILE_PATH_RE = re.compile(
+    r"(?:[\w.-]+/)+[\w.-]+|[\w.-]+\.(?:py|js|ts|tsx|jsx|go|rs|rb|java|json|yaml|yml|toml|md|sh|sql|css|html)"
+)
 
 
 def _git_repo_root(workspace_root: str) -> Optional[str]:
@@ -97,7 +101,9 @@ def persist_autosave(
 def main() -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Persist selective autosave memories (Skeleton-only)")
+    parser = argparse.ArgumentParser(
+        description="Persist selective autosave memories (Skeleton-only)"
+    )
     parser.add_argument("snapshot_file")
     parser.add_argument("--wing", required=True)
     parser.add_argument("--agent", required=True)
@@ -121,7 +127,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
 
 if __name__ == "__main__":

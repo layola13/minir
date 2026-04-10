@@ -17,13 +17,15 @@ from mimir.skeleton_search import (
     load_index_all_fast,
 )
 
+
 def cmd_status(args):
     workspace = str(Path.cwd())
     res = status_all_fast(workspace)
     print("\nMimir Skeleton Status:")
     print(f"  Total Drawers: {res.get('total_drawers', 0)}")
-    if res.get('wings'):
+    if res.get("wings"):
         print(f"  Wings: {len(res['wings'])}")
+
 
 def cmd_search(args):
     workspace = str(Path.cwd())
@@ -33,6 +35,7 @@ def cmd_search(args):
     for m in matches:
         print(f"\n--- [{m.get('snapshot', 'unknown')}] Score: {m.get('similarity', 0)} ---")
         print(m.get("preview", ""))
+
 
 def cmd_wakeup(args):
     workspace = str(Path.cwd())
@@ -47,6 +50,7 @@ def cmd_wakeup(args):
     print(f"Global Topics: {index.get('global_task_topics', [])}")
     # Minimal wake-up for now
     print("=" * 50)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Mimir Fast CLI")
@@ -71,6 +75,7 @@ def main():
         "wake-up": cmd_wakeup,
     }
     dispatch[args.command](args)
+
 
 if __name__ == "__main__":
     main()

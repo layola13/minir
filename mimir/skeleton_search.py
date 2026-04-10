@@ -20,6 +20,33 @@ _GRAPH_COUNTS_CACHE: dict[tuple[str, str], dict] = {}
 FAST_NATIVE_PACKAGE = "fast_native"
 FAST_NATIVE_SNAPSHOT = "fast-native"
 
+_POSITIONAL_FIELDS: dict[str, list[str]] = {
+    "DRAWERS": [
+        "drawer_id",
+        "wing",
+        "room",
+        "content",
+        "source_file",
+        "added_by",
+        "filed_at",
+        "topics",
+    ],
+    "DIARY_ENTRIES": ["entry_id", "agent_name", "topic", "content", "timestamp", "date"],
+    "KG_TRIPLES": [
+        "triple_id",
+        "subject",
+        "subject_id",
+        "predicate",
+        "object",
+        "object_id",
+        "valid_from",
+        "valid_to",
+        "confidence",
+        "source_closet",
+        "extracted_at",
+    ],
+}
+
 
 def _elapsed_ms(start: float) -> float:
     return round((time.perf_counter() - start) * 1000, 3)
@@ -38,7 +65,6 @@ def _path_cache_key(file_path: Path) -> tuple[str, int, int] | None:
     return (str(file_path), stat.st_mtime_ns, stat.st_size)
 
 
-
 def _parse_module(file_path: Path) -> ast.Module | None:
     cache_key = _path_cache_key(file_path)
     if cache_key is None:
@@ -53,7 +79,6 @@ def _parse_module(file_path: Path) -> ast.Module | None:
     return parsed
 
 
-
 def _read_literal_assignment(file_path: Path, name: str, fallback):
     path_key = _path_cache_key(file_path)
     if path_key is None:
@@ -65,18 +90,27 @@ def _read_literal_assignment(file_path: Path, name: str, fallback):
     if module is None:
         return fallback
     for node in module.body:
-        if not isinstance(node, ast.Assign):
+        value_node = None
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    value_node = node.value
+                    break
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+        ):
+            value_node = node.value
+        if value_node is None:
             continue
-        for target in node.targets:
-            if isinstance(target, ast.Name) and target.id == name:
-                try:
-                    value = ast.literal_eval(node.value)
-                except (ValueError, SyntaxError):
-                    return fallback
-                _LITERAL_CACHE[cache_key] = value
-                return value
+        try:
+            value = ast.literal_eval(value_node)
+        except (ValueError, SyntaxError):
+            return fallback
+        _LITERAL_CACHE[cache_key] = value
+        return value
     return fallback
-
 
 
 def _read_constructor_list(file_path: Path, name: str) -> List[dict]:
@@ -90,28 +124,62 @@ def _read_constructor_list(file_path: Path, name: str) -> List[dict]:
     if module is None:
         return []
     for node in module.body:
-        if not isinstance(node, ast.Assign):
+        target_name = None
+        value_node = None
+        if isinstance(node, ast.Assign):
+            value_node = node.value
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    target_name = target.id
+                    break
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target_name = node.target.id
+            value_node = node.value
+        if target_name != name:
             continue
-        for target in node.targets:
-            if not isinstance(target, ast.Name) or target.id != name:
-                continue
-            if not isinstance(node.value, ast.List):
-                return []
-            items: List[dict] = []
-            for element in node.value.elts:
-                if not isinstance(element, ast.Call):
-                    continue
-                payload = {}
-                for keyword in element.keywords:
+        if not isinstance(value_node, ast.List):
+            return []
+        items: List[dict] = []
+        positional_fields = _POSITIONAL_FIELDS.get(name, [])
+        for element in value_node.elts:
+            payload: dict = {}
+            if isinstance(element, ast.Dict):
+                for key_node, value_node in zip(element.keys, element.values):
+                    if key_node is None:
+                        payload = {}
+                        break
                     try:
-                        payload[str(keyword.arg)] = ast.literal_eval(keyword.value)
+                        key = ast.literal_eval(key_node)
+                        value = ast.literal_eval(value_node)
                     except (ValueError, SyntaxError):
                         payload = {}
                         break
-                if payload:
-                    items.append(payload)
-            _CONSTRUCTOR_LIST_CACHE[cache_key] = list(items)
-            return items
+                    payload[str(key)] = value
+            elif isinstance(element, ast.Call):
+                if element.keywords:
+                    for keyword in element.keywords:
+                        if keyword.arg is None:
+                            payload = {}
+                            break
+                        try:
+                            payload[str(keyword.arg)] = ast.literal_eval(keyword.value)
+                        except (ValueError, SyntaxError):
+                            payload = {}
+                            break
+                elif positional_fields:
+                    if len(element.args) != len(positional_fields):
+                        payload = {}
+                    else:
+                        for field_name, arg_node in zip(positional_fields, element.args):
+                            try:
+                                payload[field_name] = ast.literal_eval(arg_node)
+                            except (ValueError, SyntaxError):
+                                payload = {}
+                                break
+            if payload:
+                items.append(payload)
+        _CONSTRUCTOR_LIST_CACHE[cache_key] = list(items)
+        return items
     return []
 
 
@@ -129,10 +197,8 @@ def _snapshot_dir(workspace_root: str, snapshot: str) -> Path:
     return legacy
 
 
-
 def _index_path(workspace_root: str) -> Path:
     return index_output_path(workspace_root)
-
 
 
 def _load_index_summary(workspace_root: str) -> dict:
@@ -166,13 +232,11 @@ def _load_index_summary(workspace_root: str) -> dict:
     }
 
 
-
 def load_index(workspace_root: str) -> dict:
     start = time.perf_counter()
     result = _load_index_summary(workspace_root)
     result.update({"backend": "skeleton", "elapsed_ms": _elapsed_ms(start)})
     return result
-
 
 
 def list_snapshots(workspace_root: str) -> dict:
@@ -184,7 +248,6 @@ def list_snapshots(workspace_root: str) -> dict:
         "latest_snapshot": index_data["latest_snapshot"],
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def summary_for_snapshot(workspace_root: str, snapshot: str) -> dict:
@@ -203,7 +266,6 @@ def summary_for_snapshot(workspace_root: str, snapshot: str) -> dict:
         "snapshot": snapshot,
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def read_snapshot_module(workspace_root: str, snapshot: str, module: str) -> dict:
@@ -242,25 +304,20 @@ def read_snapshot_module(workspace_root: str, snapshot: str, module: str) -> dic
     }
 
 
-
 def _parse_nodes(snapshot_dir: Path) -> List[dict]:
     return _read_constructor_list(snapshot_dir / "nodes.py", "NODES")
-
 
 
 def _parse_topic_clusters(snapshot_dir: Path) -> List[dict]:
     return _read_constructor_list(snapshot_dir / "topics.py", "TOPIC_CLUSTERS")
 
 
-
 def _parse_file_references(snapshot_dir: Path) -> List[dict]:
     return _read_constructor_list(snapshot_dir / "files.py", "FILE_REFERENCES")
 
 
-
 def _parse_hard_edges(snapshot_dir: Path) -> List[dict]:
     return _read_literal_assignment(snapshot_dir / "edges.py", "hard_edges", [])
-
 
 
 def _snapshot_records(workspace_root: str, snapshot: str) -> List[dict]:
@@ -355,7 +412,6 @@ def _record_score(record: dict, query: str) -> dict:
     }
 
 
-
 def _duplicate_similarity(content: str, candidate: str) -> float:
     left = content.strip().lower()
     right = candidate.strip().lower()
@@ -380,7 +436,6 @@ def _duplicate_similarity(content: str, candidate: str) -> float:
     return round(overlap / union, 3)
 
 
-
 def _truncate_match_content(text: str) -> str:
     return text[:200] + "..." if len(text) > 200 else text
 
@@ -401,7 +456,6 @@ def _native_record_version(workspace_root: str) -> int:
     return version
 
 
-
 def _all_snapshot_records(workspace_root: str) -> List[dict]:
     index_data = _load_index_summary(workspace_root)
     snapshots = tuple(index_data["snapshots"])
@@ -413,7 +467,6 @@ def _all_snapshot_records(workspace_root: str) -> List[dict]:
         records.extend(_snapshot_records(workspace_root, snapshot))
     _ALL_RECORDS_CACHE[cache_key] = list(records)
     return records
-
 
 
 def search_skeleton(
@@ -455,11 +508,14 @@ def search_skeleton(
     return {
         "backend": "skeleton",
         "query": query,
-        "filters": {"wing": wing, "room": room, "palace_path": str(skeleton_output_path(workspace_root))},
+        "filters": {
+            "wing": wing,
+            "room": room,
+            "palace_path": str(skeleton_output_path(workspace_root)),
+        },
         "results": hits[:limit],
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def check_duplicate_skeleton(workspace_root: str, content: str, threshold: float = 0.9) -> dict:
@@ -480,7 +536,14 @@ def check_duplicate_skeleton(workspace_root: str, content: str, threshold: float
                 "snapshot": record["snapshot"],
             }
         )
-    matches.sort(key=lambda item: (-float(item.get("similarity", 0.0)), str(item.get("wing", "")), str(item.get("room", "")), str(item.get("id", ""))))
+    matches.sort(
+        key=lambda item: (
+            -float(item.get("similarity", 0.0)),
+            str(item.get("wing", "")),
+            str(item.get("room", "")),
+            str(item.get("id", "")),
+        )
+    )
     return {
         "backend": "skeleton",
         "is_duplicate": bool(matches),
@@ -488,7 +551,6 @@ def check_duplicate_skeleton(workspace_root: str, content: str, threshold: float
         "threshold": threshold,
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def get_taxonomy_fast(workspace_root: str) -> dict:
@@ -510,7 +572,6 @@ def get_taxonomy_fast(workspace_root: str) -> dict:
     }
 
 
-
 def fast_status(workspace_root: str) -> dict:
     start = time.perf_counter()
     taxonomy = get_taxonomy_fast(workspace_root)
@@ -525,11 +586,9 @@ def fast_status(workspace_root: str) -> dict:
     }
 
 
-
 def list_wings_fast(workspace_root: str) -> dict:
     result = get_taxonomy_fast(workspace_root)
     return {"backend": "skeleton", "wings": result["wings"], "elapsed_ms": result["elapsed_ms"]}
-
 
 
 def list_rooms_fast(workspace_root: str, wing: Optional[str] = None) -> dict:
@@ -550,7 +609,6 @@ def list_rooms_fast(workspace_root: str, wing: Optional[str] = None) -> dict:
     }
 
 
-
 def _snapshot_graph_counts(workspace_root: str, snapshot: str) -> dict:
     cache_key = (workspace_root, snapshot)
     if cache_key in _GRAPH_COUNTS_CACHE:
@@ -566,7 +624,6 @@ def _snapshot_graph_counts(workspace_root: str, snapshot: str) -> dict:
     return counts
 
 
-
 def _native_room_graph_nodes(workspace_root: str) -> dict[str, dict]:
     room_data: dict[str, dict] = defaultdict(lambda: {"wings": set(), "count": 0, "recent": ""})
     for record in _native_records(workspace_root):
@@ -576,11 +633,12 @@ def _native_room_graph_nodes(workspace_root: str) -> dict[str, dict]:
             continue
         room_data[room]["wings"].add(wing)
         room_data[room]["count"] += 1
-        recent = str(record.get("filed_at") or record.get("timestamp") or record.get("valid_from") or "")
+        recent = str(
+            record.get("filed_at") or record.get("timestamp") or record.get("valid_from") or ""
+        )
         if recent and recent > str(room_data[room].get("recent", "")):
             room_data[room]["recent"] = recent
     return room_data
-
 
 
 def _snapshot_room_graph_nodes(workspace_root: str) -> dict[str, dict]:
@@ -596,7 +654,6 @@ def _snapshot_room_graph_nodes(workspace_root: str) -> dict[str, dict]:
         if snapshot and snapshot > str(room_data[room].get("recent", "")):
             room_data[room]["recent"] = snapshot
     return room_data
-
 
 
 def _room_graph_stats_payload(room_data: dict[str, dict]) -> dict:
@@ -615,7 +672,9 @@ def _room_graph_stats_payload(room_data: dict[str, dict]) -> dict:
             "wings": sorted(data["wings"]),
             "count": data["count"],
         }
-        for room_name, data in sorted(room_data.items(), key=lambda item: (-len(item[1]["wings"]), -item[1]["count"], item[0]))
+        for room_name, data in sorted(
+            room_data.items(), key=lambda item: (-len(item[1]["wings"]), -item[1]["count"], item[0])
+        )
         if len(data["wings"]) >= 2
     ][:10]
     return {
@@ -627,7 +686,6 @@ def _room_graph_stats_payload(room_data: dict[str, dict]) -> dict:
         "graph_model": "shared-room projection",
         "edge_model": "rooms connect when they appear under the same wing",
     }
-
 
 
 def _traverse_room_graph(room_data: dict[str, dict], start_room: str, max_hops: int) -> dict:
@@ -676,8 +734,9 @@ def _traverse_room_graph(room_data: dict[str, dict], start_room: str, max_hops: 
     return {"results": results[:50]}
 
 
-
-def _find_tunnels_payload(room_data: dict[str, dict], wing_a: Optional[str] = None, wing_b: Optional[str] = None) -> list[dict]:
+def _find_tunnels_payload(
+    room_data: dict[str, dict], wing_a: Optional[str] = None, wing_b: Optional[str] = None
+) -> list[dict]:
     tunnels = []
     for room_name, data in room_data.items():
         wings = sorted(data["wings"])
@@ -700,9 +759,6 @@ def _find_tunnels_payload(room_data: dict[str, dict], wing_a: Optional[str] = No
     return tunnels[:50]
 
 
-
-
-
 def graph_stats_fast(workspace_root: str) -> dict:
     start = time.perf_counter()
     room_data = _snapshot_room_graph_nodes(workspace_root)
@@ -718,7 +774,6 @@ def graph_stats_fast(workspace_root: str) -> dict:
         }
     )
     return stats
-
 
 
 def neighbors_fast(workspace_root: str, snapshot: str, node_index: int) -> dict:
@@ -743,7 +798,11 @@ def neighbors_fast(workspace_root: str, snapshot: str, node_index: int) -> dict:
             continue
         shared_topics = sorted(current_topics.intersection(node.get("topics", [])))
         shared_files = sorted(current_files.intersection(node.get("files", [])))
-        if not shared_topics and not shared_files and current.get("memory_type") != node.get("memory_type"):
+        if (
+            not shared_topics
+            and not shared_files
+            and current.get("memory_type") != node.get("memory_type")
+        ):
             continue
         relation = "same_type"
         if shared_topics:
@@ -769,11 +828,14 @@ def neighbors_fast(workspace_root: str, snapshot: str, node_index: int) -> dict:
     }
 
 
-
 def top_topics_fast(workspace_root: str, snapshot: Optional[str] = None) -> dict:
     start = time.perf_counter()
     counts = Counter()
-    records = _snapshot_records(workspace_root, snapshot) if snapshot else _all_snapshot_records(workspace_root)
+    records = (
+        _snapshot_records(workspace_root, snapshot)
+        if snapshot
+        else _all_snapshot_records(workspace_root)
+    )
     for record in records:
         counts.update(record.get("topics", []))
     return {
@@ -783,11 +845,14 @@ def top_topics_fast(workspace_root: str, snapshot: Optional[str] = None) -> dict
     }
 
 
-
 def top_files_fast(workspace_root: str, snapshot: Optional[str] = None) -> dict:
     start = time.perf_counter()
     counts = Counter()
-    records = _snapshot_records(workspace_root, snapshot) if snapshot else _all_snapshot_records(workspace_root)
+    records = (
+        _snapshot_records(workspace_root, snapshot)
+        if snapshot
+        else _all_snapshot_records(workspace_root)
+    )
     for record in records:
         counts.update([path for path in record.get("files", []) if path])
     return {
@@ -797,10 +862,11 @@ def top_files_fast(workspace_root: str, snapshot: Optional[str] = None) -> dict:
     }
 
 
-
 def traverse_fast(workspace_root: str, start_room: str, max_hops: int = 2) -> dict:
     start = time.perf_counter()
-    traversal = _traverse_room_graph(_snapshot_room_graph_nodes(workspace_root), start_room, max_hops)
+    traversal = _traverse_room_graph(
+        _snapshot_room_graph_nodes(workspace_root), start_room, max_hops
+    )
     traversal.update(
         {
             "backend": "skeleton",
@@ -808,7 +874,13 @@ def traverse_fast(workspace_root: str, start_room: str, max_hops: int = 2) -> di
             "max_hops": max_hops,
             "graph_model": "shared-room projection",
             "paths": [
-                {"from": item.get("connected_via", [start_room])[0] if item.get("connected_via") else start_room, "to": item["room"], "depth": item["hop"]}
+                {
+                    "from": item.get("connected_via", [start_room])[0]
+                    if item.get("connected_via")
+                    else start_room,
+                    "to": item["room"],
+                    "depth": item["hop"],
+                }
                 for item in traversal.get("results", [])
                 if item.get("hop", 0) > 0
             ],
@@ -818,10 +890,13 @@ def traverse_fast(workspace_root: str, start_room: str, max_hops: int = 2) -> di
     return traversal
 
 
-
-def find_tunnels_fast(workspace_root: str, wing_a: Optional[str] = None, wing_b: Optional[str] = None) -> dict:
+def find_tunnels_fast(
+    workspace_root: str, wing_a: Optional[str] = None, wing_b: Optional[str] = None
+) -> dict:
     start = time.perf_counter()
-    tunnels = _find_tunnels_payload(_snapshot_room_graph_nodes(workspace_root), wing_a=wing_a, wing_b=wing_b)
+    tunnels = _find_tunnels_payload(
+        _snapshot_room_graph_nodes(workspace_root), wing_a=wing_a, wing_b=wing_b
+    )
     return {
         "backend": "skeleton",
         "wing_a": wing_a,
@@ -841,7 +916,6 @@ def _fast_native_root(workspace_root: str) -> Path:
     return skeleton_output_path(workspace_root) / FAST_NATIVE_PACKAGE
 
 
-
 def _fast_native_files(workspace_root: str) -> List[Path]:
     root = _fast_native_root(workspace_root)
     return [
@@ -859,35 +933,226 @@ def _fast_native_files(workspace_root: str) -> List[Path]:
     ]
 
 
-
 def _quoted(value: str) -> str:
     return repr(value)
-
 
 
 def _normalize_entity(value: str) -> str:
     return value.lower().replace(" ", "_").replace("'", "")
 
 
-
 def _current_timestamp() -> str:
     return datetime.now().isoformat()
-
 
 
 def _native_drawers(workspace_root: str) -> List[dict]:
     return _read_constructor_list(_fast_native_root(workspace_root) / "drawers.py", "DRAWERS")
 
 
-
 def _native_diary_entries(workspace_root: str) -> List[dict]:
     return _read_constructor_list(_fast_native_root(workspace_root) / "diary.py", "DIARY_ENTRIES")
-
 
 
 def _native_kg_triples(workspace_root: str) -> List[dict]:
     return _read_constructor_list(_fast_native_root(workspace_root) / "kg.py", "KG_TRIPLES")
 
+
+def _session_summaries(workspace_root: str) -> List[dict]:
+    index_path = _index_path(workspace_root)
+    return list(_read_literal_assignment(index_path, "SESSION_SUMMARIES", []))
+
+
+def _timestamp_from_snapshot_summary(summary: dict, fallback: str) -> str:
+    mtime = summary.get("mtime")
+    if isinstance(mtime, (int, float)):
+        try:
+            return datetime.utcfromtimestamp(float(mtime)).isoformat()
+        except (OSError, ValueError):
+            return fallback
+    return fallback
+
+
+def _date_from_timestamp(timestamp: str) -> str:
+    if "T" in timestamp:
+        return timestamp.split("T", 1)[0]
+    return timestamp[:10] if len(timestamp) >= 10 else date.today().isoformat()
+
+
+def _safe_iso_timestamp(value: object, fallback: str) -> str:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return fallback
+
+
+def _build_native_backfill_payload(
+    workspace_root: str,
+) -> tuple[List[dict], List[dict], List[dict]]:
+    now = _current_timestamp()
+    index_data = _load_index_summary(workspace_root)
+    snapshot_summaries = [
+        dict(item)
+        for item in index_data.get("snapshot_summaries", [])
+        if isinstance(item, dict)
+        and str(item.get("name", "")).strip()
+        and str(item.get("name")) != FAST_NATIVE_SNAPSHOT
+    ]
+    session_summaries = [
+        dict(item) for item in _session_summaries(workspace_root) if isinstance(item, dict)
+    ]
+
+    drawers: List[dict] = []
+    diary_entries: List[dict] = []
+    kg_triples: List[dict] = []
+
+    seen_drawers: set[str] = set()
+    seen_diary: set[str] = set()
+    seen_triples: set[tuple[str, str, str]] = set()
+
+    for summary in snapshot_summaries:
+        snapshot_name = str(summary.get("name", "")).strip()
+        if not snapshot_name:
+            continue
+        drawer_id = f"drawer_snapshot_{_normalize_entity(snapshot_name)}"
+        if drawer_id in seen_drawers:
+            continue
+        seen_drawers.add(drawer_id)
+
+        task_description = str(summary.get("task_description", "")).strip()
+        top_topics = [
+            str(topic) for topic in list(summary.get("top_topics", [])) if str(topic).strip()
+        ]
+        task_topics = [
+            str(topic) for topic in list(summary.get("task_topics", [])) if str(topic).strip()
+        ]
+        top_files = [str(path) for path in list(summary.get("top_files", [])) if str(path).strip()]
+        memory_count = int(summary.get("memory_count", 0) or 0)
+        filed_at = _timestamp_from_snapshot_summary(summary, now)
+
+        parts = [f"snapshot={snapshot_name}", f"memory_count={memory_count}"]
+        if task_description:
+            parts.append(f"task={task_description}")
+        if top_topics:
+            parts.append("top_topics=" + ", ".join(top_topics[:3]))
+        if top_files:
+            parts.append("top_files=" + ", ".join(top_files[:3]))
+
+        drawers.append(
+            {
+                "drawer_id": drawer_id,
+                "wing": "conversation-skeleton",
+                "room": f"snapshot:{snapshot_name}",
+                "content": " | ".join(parts),
+                "source_file": "__index__.py",
+                "added_by": "backfill",
+                "filed_at": filed_at,
+                "topics": (top_topics or task_topics or _extract_tokens(" ".join(parts)))[:5],
+            }
+        )
+
+        valid_from = _date_from_timestamp(filed_at)
+        subject_id = _normalize_entity(snapshot_name)
+        for topic in top_topics[:5]:
+            topic_name = topic.strip()
+            if not topic_name:
+                continue
+            triple_key = (subject_id, "has_topic", _normalize_entity(topic_name))
+            if triple_key in seen_triples:
+                continue
+            seen_triples.add(triple_key)
+            triple_id = f"t_{subject_id}_has_topic_{_normalize_entity(topic_name)}_{hashlib.md5((snapshot_name + topic_name).encode()).hexdigest()[:8]}"
+            kg_triples.append(
+                {
+                    "triple_id": triple_id,
+                    "subject": snapshot_name,
+                    "subject_id": subject_id,
+                    "predicate": "has_topic",
+                    "object": topic_name,
+                    "object_id": _normalize_entity(topic_name),
+                    "valid_from": valid_from,
+                    "valid_to": None,
+                    "confidence": 1.0,
+                    "source_closet": "snapshot-index",
+                    "extracted_at": filed_at,
+                }
+            )
+
+    for session in session_summaries:
+        session_id = str(session.get("session_id", "")).strip()
+        if not session_id:
+            continue
+        updated_at = _safe_iso_timestamp(session.get("updated_at"), now)
+        latest_snapshot = str(session.get("latest_snapshot", "")).strip()
+        latest_task = str(session.get("latest_task_description", "")).strip()
+        latest_topics = [
+            str(topic)
+            for topic in list(session.get("latest_task_topics", []))
+            if str(topic).strip()
+        ]
+        entry_id = f"diary_session_{_normalize_entity(session_id)}_{hashlib.md5(updated_at.encode()).hexdigest()[:8]}"
+        if entry_id not in seen_diary:
+            seen_diary.add(entry_id)
+            content_parts = [f"session={session_id}"]
+            if latest_snapshot:
+                content_parts.append(f"latest_snapshot={latest_snapshot}")
+            if latest_task:
+                content_parts.append(f"latest_task={latest_task}")
+            if latest_topics:
+                content_parts.append("topics=" + ", ".join(latest_topics[:5]))
+            diary_entries.append(
+                {
+                    "entry_id": entry_id,
+                    "agent_name": "session",
+                    "topic": "session-summary",
+                    "content": " | ".join(content_parts),
+                    "timestamp": updated_at,
+                    "date": _date_from_timestamp(updated_at),
+                }
+            )
+
+        subject = f"session:{session_id}"
+        subject_id = _normalize_entity(subject)
+        valid_from = _date_from_timestamp(updated_at)
+        for snapshot_name in list(session.get("snapshots", [])):
+            snapshot_value = str(snapshot_name).strip()
+            if not snapshot_value:
+                continue
+            object_id = _normalize_entity(snapshot_value)
+            triple_key = (subject_id, "has_snapshot", object_id)
+            if triple_key in seen_triples:
+                continue
+            seen_triples.add(triple_key)
+            triple_id = f"t_{subject_id}_has_snapshot_{object_id}_{hashlib.md5((subject + snapshot_value).encode()).hexdigest()[:8]}"
+            kg_triples.append(
+                {
+                    "triple_id": triple_id,
+                    "subject": subject,
+                    "subject_id": subject_id,
+                    "predicate": "has_snapshot",
+                    "object": snapshot_value,
+                    "object_id": object_id,
+                    "valid_from": valid_from,
+                    "valid_to": None,
+                    "confidence": 1.0,
+                    "source_closet": "session-index",
+                    "extracted_at": updated_at,
+                }
+            )
+
+    return drawers, diary_entries, kg_triples
+
+
+def _ensure_native_backfill(workspace_root: str) -> None:
+    if (
+        _native_drawers(workspace_root)
+        or _native_diary_entries(workspace_root)
+        or _native_kg_triples(workspace_root)
+    ):
+        return
+    drawers, diary_entries, kg_triples = _build_native_backfill_payload(workspace_root)
+    if not drawers and not diary_entries and not kg_triples:
+        return
+    _write_fast_native_package(workspace_root, drawers, diary_entries, kg_triples)
+    _clear_caches()
 
 
 def _topic_groups_from_records(records: List[dict]) -> List[dict]:
@@ -900,7 +1165,6 @@ def _topic_groups_from_records(records: List[dict]) -> List[dict]:
         for topic, indexes in sorted(groups.items())
         if len(indexes) >= 2
     ]
-
 
 
 def _file_groups_from_records(records: List[dict]) -> List[dict]:
@@ -916,7 +1180,6 @@ def _file_groups_from_records(records: List[dict]) -> List[dict]:
     ]
 
 
-
 def _pattern_groups_from_records(records: List[dict]) -> List[dict]:
     groups: Dict[str, List[int]] = defaultdict(list)
     for idx, record in enumerate(records):
@@ -926,7 +1189,6 @@ def _pattern_groups_from_records(records: List[dict]) -> List[dict]:
         for name, indexes in sorted(groups.items())
         if len(indexes) >= 2
     ]
-
 
 
 def _co_occurrences_from_records(records: List[dict]) -> List[dict]:
@@ -941,7 +1203,6 @@ def _co_occurrences_from_records(records: List[dict]) -> List[dict]:
         for (left, right), count in sorted(pair_counts.items())
         if count >= 2
     ]
-
 
 
 def _hard_edges_from_records(records: List[dict]) -> List[dict]:
@@ -961,8 +1222,8 @@ def _hard_edges_from_records(records: List[dict]) -> List[dict]:
     return edges
 
 
-
 def _native_records(workspace_root: str) -> List[dict]:
+    _ensure_native_backfill(workspace_root)
     version = _native_record_version(workspace_root)
     index_data = _load_index_summary(workspace_root)
     snapshots = tuple(index_data["snapshots"])
@@ -1043,7 +1304,6 @@ def _native_records(workspace_root: str) -> List[dict]:
     return records
 
 
-
 def _native_index_text(summary: dict) -> str:
     lines = [
         "# __index__.py  (auto-generated fast native navigation bus)",
@@ -1065,7 +1325,6 @@ def _native_index_text(summary: dict) -> str:
         f"    return {FAST_NATIVE_SNAPSHOT!r}",
     ]
     return "\n".join(lines) + "\n"
-
 
 
 def _write_fast_native_package(
@@ -1243,7 +1502,9 @@ def _write_fast_native_package(
         "TOPIC_CLUSTERS = [",
     ]
     for group in topic_groups:
-        topics_lines.append(f"    TopicCluster(name={group['name']!r}, members={group['members']!r}),")
+        topics_lines.append(
+            f"    TopicCluster(name={group['name']!r}, members={group['members']!r}),"
+        )
     topics_lines.extend(["]", ""])
     topics_text = "\n".join(topics_lines)
 
@@ -1258,7 +1519,9 @@ def _write_fast_native_package(
         "FILE_REFERENCES = [",
     ]
     for group in file_groups:
-        files_lines.append(f"    FileReference(path={group['path']!r}, members={group['members']!r}),")
+        files_lines.append(
+            f"    FileReference(path={group['path']!r}, members={group['members']!r}),"
+        )
     files_lines.extend(["]", ""])
     files_text = "\n".join(files_lines)
 
@@ -1273,7 +1536,9 @@ def _write_fast_native_package(
         "REPEATED_PATTERNS = [",
     ]
     for group in pattern_groups:
-        patterns_lines.append(f"    PatternGroup(name={group['name']!r}, members={group['members']!r}),")
+        patterns_lines.append(
+            f"    PatternGroup(name={group['name']!r}, members={group['members']!r}),"
+        )
     patterns_lines.extend(["]", ""])
     patterns_text = "\n".join(patterns_lines)
 
@@ -1281,9 +1546,9 @@ def _write_fast_native_package(
         [
             "from __future__ import annotations",
             "",
-            "from mimir.topics import TOPIC_CLUSTERS",
-            "from mimir.files import FILE_REFERENCES",
-            "from mimir.patterns import REPEATED_PATTERNS",
+            "from .topics import TOPIC_CLUSTERS",
+            "from .files import FILE_REFERENCES",
+            "from .patterns import REPEATED_PATTERNS",
             "",
             "class RelationGraph:",
             f"    memory_count = {len(records)!r}",
@@ -1417,7 +1682,6 @@ def _write_fast_native_package(
     (root / "__index__.py").write_text(_native_index_text(summary), encoding="utf-8")
 
 
-
 def add_drawer_fast(
     workspace_root: str,
     wing: str,
@@ -1443,13 +1707,17 @@ def add_drawer_fast(
                         "wing": item.get("wing", wing),
                         "room": item.get("room", room),
                         "similarity": 1.0,
-                        "content": match_content[:200] + "..." if len(match_content) > 200 else match_content,
+                        "content": match_content[:200] + "..."
+                        if len(match_content) > 200
+                        else match_content,
                     }
                 ],
                 "elapsed_ms": _elapsed_ms(start),
             }
     filed_at = _current_timestamp()
-    drawer_id = f"drawer_{wing}_{room}_{hashlib.md5((content + filed_at).encode()).hexdigest()[:16]}"
+    drawer_id = (
+        f"drawer_{wing}_{room}_{hashlib.md5((content + filed_at).encode()).hexdigest()[:16]}"
+    )
     drawers.append(
         {
             "drawer_id": drawer_id,
@@ -1462,7 +1730,12 @@ def add_drawer_fast(
             "topics": _extract_tokens(content)[:5],
         }
     )
-    _write_fast_native_package(workspace_root, drawers, _native_diary_entries(workspace_root), _native_kg_triples(workspace_root))
+    _write_fast_native_package(
+        workspace_root,
+        drawers,
+        _native_diary_entries(workspace_root),
+        _native_kg_triples(workspace_root),
+    )
     refresh_fast_state()
     return {
         "backend": "skeleton",
@@ -1472,7 +1745,6 @@ def add_drawer_fast(
         "room": room,
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def delete_drawer_fast(workspace_root: str, drawer_id: str) -> dict:
@@ -1487,7 +1759,12 @@ def delete_drawer_fast(workspace_root: str, drawer_id: str) -> dict:
             "result": False,
             "elapsed_ms": _elapsed_ms(start),
         }
-    _write_fast_native_package(workspace_root, drawers, _native_diary_entries(workspace_root), _native_kg_triples(workspace_root))
+    _write_fast_native_package(
+        workspace_root,
+        drawers,
+        _native_diary_entries(workspace_root),
+        _native_kg_triples(workspace_root),
+    )
     refresh_fast_state()
     return {
         "backend": "skeleton",
@@ -1498,8 +1775,9 @@ def delete_drawer_fast(workspace_root: str, drawer_id: str) -> dict:
     }
 
 
-
-def diary_write_fast(workspace_root: str, agent_name: str, entry: str, topic: str = "general") -> dict:
+def diary_write_fast(
+    workspace_root: str, agent_name: str, entry: str, topic: str = "general"
+) -> dict:
     start = time.perf_counter()
     diary_entries = _native_diary_entries(workspace_root)
     now = datetime.now()
@@ -1515,7 +1793,12 @@ def diary_write_fast(workspace_root: str, agent_name: str, entry: str, topic: st
             "date": now.strftime("%Y-%m-%d"),
         }
     )
-    _write_fast_native_package(workspace_root, _native_drawers(workspace_root), diary_entries, _native_kg_triples(workspace_root))
+    _write_fast_native_package(
+        workspace_root,
+        _native_drawers(workspace_root),
+        diary_entries,
+        _native_kg_triples(workspace_root),
+    )
     refresh_fast_state()
     return {
         "backend": "skeleton",
@@ -1528,10 +1811,13 @@ def diary_write_fast(workspace_root: str, agent_name: str, entry: str, topic: st
     }
 
 
-
 def diary_read_fast(workspace_root: str, agent_name: str, last_n: int = 10) -> dict:
     start = time.perf_counter()
-    entries = [item for item in _native_diary_entries(workspace_root) if item.get("agent_name") == agent_name]
+    entries = [
+        item
+        for item in _native_diary_entries(workspace_root)
+        if item.get("agent_name") == agent_name
+    ]
     if not entries:
         return {
             "backend": "skeleton",
@@ -1558,7 +1844,6 @@ def diary_read_fast(workspace_root: str, agent_name: str, last_n: int = 10) -> d
         "showing": len(selected),
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def kg_add_fast(
@@ -1605,7 +1890,12 @@ def kg_add_fast(
             "extracted_at": _current_timestamp(),
         }
     )
-    _write_fast_native_package(workspace_root, _native_drawers(workspace_root), _native_diary_entries(workspace_root), triples)
+    _write_fast_native_package(
+        workspace_root,
+        _native_drawers(workspace_root),
+        _native_diary_entries(workspace_root),
+        triples,
+    )
     refresh_fast_state()
     return {
         "backend": "skeleton",
@@ -1616,8 +1906,9 @@ def kg_add_fast(
     }
 
 
-
-def kg_invalidate_fast(workspace_root: str, subject: str, predicate: str, object: str, ended: str = None) -> dict:
+def kg_invalidate_fast(
+    workspace_root: str, subject: str, predicate: str, object: str, ended: str = None
+) -> dict:
     start = time.perf_counter()
     triples = _native_kg_triples(workspace_root)
     subject_id = _normalize_entity(subject)
@@ -1634,7 +1925,12 @@ def kg_invalidate_fast(workspace_root: str, subject: str, predicate: str, object
         ):
             triple["valid_to"] = ended_value
             updated += 1
-    _write_fast_native_package(workspace_root, _native_drawers(workspace_root), _native_diary_entries(workspace_root), triples)
+    _write_fast_native_package(
+        workspace_root,
+        _native_drawers(workspace_root),
+        _native_diary_entries(workspace_root),
+        triples,
+    )
     refresh_fast_state()
     return {
         "backend": "skeleton",
@@ -1646,8 +1942,9 @@ def kg_invalidate_fast(workspace_root: str, subject: str, predicate: str, object
     }
 
 
-
-def kg_query_fast(workspace_root: str, entity: str, as_of: str = None, direction: str = "both") -> dict:
+def kg_query_fast(
+    workspace_root: str, entity: str, as_of: str = None, direction: str = "both"
+) -> dict:
     start = time.perf_counter()
     entity_id = _normalize_entity(entity)
     facts = []
@@ -1697,7 +1994,6 @@ def kg_query_fast(workspace_root: str, entity: str, as_of: str = None, direction
     }
 
 
-
 def kg_timeline_fast(workspace_root: str, entity: str = None) -> dict:
     start = time.perf_counter()
     entity_id = _normalize_entity(entity) if entity else None
@@ -1733,12 +2029,13 @@ def kg_timeline_fast(workspace_root: str, entity: str = None) -> dict:
     }
 
 
-
 def kg_stats_fast(workspace_root: str) -> dict:
     start = time.perf_counter()
     triples = _native_kg_triples(workspace_root)
     current = sum(1 for triple in triples if triple.get("valid_to") is None)
-    predicates = sorted({str(triple.get("predicate", "")) for triple in triples if triple.get("predicate")})
+    predicates = sorted(
+        {str(triple.get("predicate", "")) for triple in triples if triple.get("predicate")}
+    )
     entities = {str(triple.get("subject", "")) for triple in triples if triple.get("subject")} | {
         str(triple.get("object", "")) for triple in triples if triple.get("object")
     }
@@ -1751,7 +2048,6 @@ def kg_stats_fast(workspace_root: str) -> dict:
         "relationship_types": predicates,
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def fast_root_status(workspace_root: str) -> dict:
@@ -1774,11 +2070,9 @@ def fast_root_status(workspace_root: str) -> dict:
     }
 
 
-
 def list_wings_native(workspace_root: str) -> dict:
     result = fast_root_status(workspace_root)
     return {"backend": "skeleton", "wings": result["wings"], "elapsed_ms": result["elapsed_ms"]}
-
 
 
 def list_rooms_native(workspace_root: str, wing: Optional[str] = None) -> dict:
@@ -1794,7 +2088,6 @@ def list_rooms_native(workspace_root: str, wing: Optional[str] = None) -> dict:
         "rooms": dict(sorted(rooms.items())),
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def taxonomy_native(workspace_root: str) -> dict:
@@ -1813,8 +2106,13 @@ def taxonomy_native(workspace_root: str) -> dict:
     }
 
 
-
-def search_native(workspace_root: str, query: str, wing: Optional[str] = None, room: Optional[str] = None, limit: int = 5) -> dict:
+def search_native(
+    workspace_root: str,
+    query: str,
+    wing: Optional[str] = None,
+    room: Optional[str] = None,
+    limit: int = 5,
+) -> dict:
     start = time.perf_counter()
     hits = []
     for record in _native_records(workspace_root):
@@ -1834,15 +2132,25 @@ def search_native(workspace_root: str, query: str, wing: Optional[str] = None, r
         enriched["projection_kind"] = "native_record"
         enriched["score_breakdown"] = {k: v for k, v in score.items() if k != "score"}
         hits.append(enriched)
-    hits.sort(key=lambda item: (-item["local_score"], item.get("wing", ""), item.get("room", ""), item.get("drawer_id", "")))
+    hits.sort(
+        key=lambda item: (
+            -item["local_score"],
+            item.get("wing", ""),
+            item.get("room", ""),
+            item.get("drawer_id", ""),
+        )
+    )
     return {
         "backend": "skeleton",
         "query": query,
-        "filters": {"wing": wing, "room": room, "palace_path": str(_fast_native_root(workspace_root))},
+        "filters": {
+            "wing": wing,
+            "room": room,
+            "palace_path": str(_fast_native_root(workspace_root)),
+        },
         "results": hits[:limit],
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def duplicate_native(workspace_root: str, content: str, threshold: float = 0.9) -> dict:
@@ -1862,7 +2170,14 @@ def duplicate_native(workspace_root: str, content: str, threshold: float = 0.9) 
                 "content": _truncate_match_content(body),
             }
         )
-    matches.sort(key=lambda item: (-float(item.get("similarity", 0.0)), str(item.get("wing", "")), str(item.get("room", "")), str(item.get("id", ""))))
+    matches.sort(
+        key=lambda item: (
+            -float(item.get("similarity", 0.0)),
+            str(item.get("wing", "")),
+            str(item.get("room", "")),
+            str(item.get("id", "")),
+        )
+    )
     return {
         "backend": "skeleton",
         "is_duplicate": bool(matches),
@@ -1870,7 +2185,6 @@ def duplicate_native(workspace_root: str, content: str, threshold: float = 0.9) 
         "threshold": threshold,
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def traverse_native(workspace_root: str, start_room: str, max_hops: int = 2) -> dict:
@@ -1908,8 +2222,9 @@ def traverse_native(workspace_root: str, start_room: str, max_hops: int = 2) -> 
     }
 
 
-
-def find_tunnels_native(workspace_root: str, wing_a: Optional[str] = None, wing_b: Optional[str] = None) -> dict:
+def find_tunnels_native(
+    workspace_root: str, wing_a: Optional[str] = None, wing_b: Optional[str] = None
+) -> dict:
     start = time.perf_counter()
     taxonomy = taxonomy_native(workspace_root)["taxonomy"]
     if wing_a and wing_b:
@@ -1935,7 +2250,6 @@ def find_tunnels_native(workspace_root: str, wing_a: Optional[str] = None, wing_
     }
 
 
-
 def graph_stats_native(workspace_root: str) -> dict:
     start = time.perf_counter()
     room_data = _native_room_graph_nodes(workspace_root)
@@ -1953,7 +2267,6 @@ def graph_stats_native(workspace_root: str) -> dict:
     return stats
 
 
-
 def top_topics_native(workspace_root: str) -> dict:
     start = time.perf_counter()
     counts = Counter()
@@ -1966,7 +2279,6 @@ def top_topics_native(workspace_root: str) -> dict:
     }
 
 
-
 def top_files_native(workspace_root: str) -> dict:
     start = time.perf_counter()
     counts = Counter()
@@ -1977,7 +2289,6 @@ def top_files_native(workspace_root: str) -> dict:
         "files": [{"path": path, "count": count} for path, count in counts.most_common(10)],
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def neighbors_native(workspace_root: str, drawer_id: str) -> dict:
@@ -1996,7 +2307,9 @@ def neighbors_native(workspace_root: str, drawer_id: str) -> dict:
     for record in records:
         if record.get("drawer_id") == drawer_id:
             continue
-        shared_topics = sorted(set(current.get("topics", [])).intersection(record.get("topics", [])))
+        shared_topics = sorted(
+            set(current.get("topics", [])).intersection(record.get("topics", []))
+        )
         shared_files = sorted(set(current.get("files", [])).intersection(record.get("files", [])))
         if not shared_topics and not shared_files and current.get("wing") != record.get("wing"):
             continue
@@ -2024,7 +2337,6 @@ def neighbors_native(workspace_root: str, drawer_id: str) -> dict:
     }
 
 
-
 def list_native_records(workspace_root: str) -> dict:
     start = time.perf_counter()
     return {
@@ -2034,9 +2346,9 @@ def list_native_records(workspace_root: str) -> dict:
     }
 
 
-
 def summary_native(workspace_root: str) -> dict:
     start = time.perf_counter()
+    _ensure_native_backfill(workspace_root)
     summary_path = _fast_native_root(workspace_root) / "summary.py"
     summary = {
         "name": FAST_NATIVE_SNAPSHOT,
@@ -2044,18 +2356,32 @@ def summary_native(workspace_root: str) -> dict:
         "drawers": _read_literal_assignment(summary_path, "DRAWER_COUNT", 0),
         "diary_entries": _read_literal_assignment(summary_path, "DIARY_ENTRY_COUNT", 0),
         "kg_triples": _read_literal_assignment(summary_path, "KG_TRIPLE_COUNT", 0),
-        "task_description": _read_literal_assignment(summary_path, "TASK_DESCRIPTION", "fast native python skeleton"),
-        "task_topics": _read_literal_assignment(summary_path, "TASK_TOPICS", ["fast", "native", "skeleton"]),
+        "task_description": _read_literal_assignment(
+            summary_path, "TASK_DESCRIPTION", "fast native python skeleton"
+        ),
+        "task_topics": _read_literal_assignment(
+            summary_path, "TASK_TOPICS", ["fast", "native", "skeleton"]
+        ),
         "top_topics": _read_literal_assignment(summary_path, "TOP_TOPICS", []),
         "top_files": _read_literal_assignment(summary_path, "TOP_FILES", []),
     }
     return {"backend": "skeleton", "summary": summary, "elapsed_ms": _elapsed_ms(start)}
 
 
-
 def read_native_module(workspace_root: str, module: str) -> dict:
     start = time.perf_counter()
-    allowed_modules = {"__init__", "summary", "nodes", "topics", "files", "patterns", "edges"}
+    allowed_modules = {
+        "__init__",
+        "summary",
+        "nodes",
+        "topics",
+        "files",
+        "patterns",
+        "edges",
+        "drawers",
+        "diary",
+        "kg",
+    }
     if module not in allowed_modules:
         return {
             "backend": "skeleton",
@@ -2087,36 +2413,44 @@ def read_native_module(workspace_root: str, module: str) -> dict:
     }
 
 
-
 def load_native_index(workspace_root: str) -> dict:
     start = time.perf_counter()
+    _ensure_native_backfill(workspace_root)
     index_path = _fast_native_root(workspace_root) / "__index__.py"
     native_summary = summary_native(workspace_root)["summary"]
     if not index_path.exists():
-        _write_fast_native_package(workspace_root, _native_drawers(workspace_root), _native_diary_entries(workspace_root), _native_kg_triples(workspace_root))
+        _write_fast_native_package(
+            workspace_root,
+            _native_drawers(workspace_root),
+            _native_diary_entries(workspace_root),
+            _native_kg_triples(workspace_root),
+        )
     return {
         "backend": "skeleton",
         "exists": True,
         "index_path": str(index_path),
         "snapshots": [FAST_NATIVE_SNAPSHOT],
-        "snapshot_summaries": [{
-            "name": FAST_NATIVE_SNAPSHOT,
-            "memory_count": native_summary["memory_count"],
-            "task_description": native_summary["task_description"],
-            "task_topics": native_summary["task_topics"],
-            "top_topics": native_summary["top_topics"],
-            "top_files": native_summary["top_files"],
-        }],
+        "snapshot_summaries": [
+            {
+                "name": FAST_NATIVE_SNAPSHOT,
+                "memory_count": native_summary["memory_count"],
+                "task_description": native_summary["task_description"],
+                "task_topics": native_summary["task_topics"],
+                "top_topics": native_summary["top_topics"],
+                "top_files": native_summary["top_files"],
+            }
+        ],
         "global_top_topics": list(native_summary["top_topics"]),
         "global_top_files": list(native_summary["top_files"]),
         "global_task_topics": list(native_summary["task_topics"]),
         "latest_snapshot": FAST_NATIVE_SNAPSHOT,
         "snapshot_count": 1,
         "total_memory_count": native_summary["memory_count"],
-        "index_text": index_path.read_text(encoding="utf-8") if index_path.exists() else _native_index_text(native_summary),
+        "index_text": index_path.read_text(encoding="utf-8")
+        if index_path.exists()
+        else _native_index_text(native_summary),
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def summary_for_native_snapshot(workspace_root: str) -> dict:
@@ -2148,8 +2482,13 @@ def _all_records(workspace_root: str) -> List[dict]:
     return _all_snapshot_records(workspace_root) + _native_records(workspace_root)
 
 
-
-def search_all_fast(workspace_root: str, query: str, wing: Optional[str] = None, room: Optional[str] = None, limit: int = 5) -> dict:
+def search_all_fast(
+    workspace_root: str,
+    query: str,
+    wing: Optional[str] = None,
+    room: Optional[str] = None,
+    limit: int = 5,
+) -> dict:
     start = time.perf_counter()
     hits = []
     for record in _all_records(workspace_root):
@@ -2166,7 +2505,9 @@ def search_all_fast(workspace_root: str, query: str, wing: Optional[str] = None,
         enriched["local_score"] = round(score["score"], 3)
         enriched["similarity"] = enriched["local_score"]
         enriched["score_kind"] = "local_rule_score"
-        enriched["projection_kind"] = "native_record" if record.get("record_type") != "snapshot" else "snapshot_record"
+        enriched["projection_kind"] = (
+            "native_record" if record.get("record_type") != "snapshot" else "snapshot_record"
+        )
         enriched["score_breakdown"] = {k: v for k, v in score.items() if k != "score"}
         hits.append(enriched)
     hits.sort(
@@ -2185,11 +2526,14 @@ def search_all_fast(workspace_root: str, query: str, wing: Optional[str] = None,
     return {
         "backend": "skeleton",
         "query": query,
-        "filters": {"wing": wing, "room": room, "palace_path": str(skeleton_output_path(workspace_root))},
+        "filters": {
+            "wing": wing,
+            "room": room,
+            "palace_path": str(skeleton_output_path(workspace_root)),
+        },
         "results": hits[:limit],
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def duplicate_all_fast(workspace_root: str, content: str, threshold: float = 0.9) -> dict:
@@ -2204,13 +2548,27 @@ def duplicate_all_fast(workspace_root: str, content: str, threshold: float = 0.9
             **match,
             "content": match_content[:200] + "..." if len(match_content) > 200 else match_content,
         }
-        key = (normalized.get("id"), normalized.get("wing"), normalized.get("room"), normalized.get("content"))
+        key = (
+            normalized.get("id"),
+            normalized.get("wing"),
+            normalized.get("room"),
+            normalized.get("content"),
+        )
         if key in seen_keys:
             continue
         seen_keys.add(key)
         normalized_matches.append(normalized)
-    normalized_matches.sort(key=lambda item: (-float(item.get("similarity", 0.0)), str(item.get("wing", "")), str(item.get("room", "")), str(item.get("id", ""))))
-    filtered_matches = [match for match in normalized_matches if float(match.get("similarity", 0.0)) >= threshold]
+    normalized_matches.sort(
+        key=lambda item: (
+            -float(item.get("similarity", 0.0)),
+            str(item.get("wing", "")),
+            str(item.get("room", "")),
+            str(item.get("id", "")),
+        )
+    )
+    filtered_matches = [
+        match for match in normalized_matches if float(match.get("similarity", 0.0)) >= threshold
+    ]
     return {
         "backend": "skeleton",
         "is_duplicate": bool(filtered_matches),
@@ -2220,11 +2578,12 @@ def duplicate_all_fast(workspace_root: str, content: str, threshold: float = 0.9
     }
 
 
-
 def status_all_fast(workspace_root: str) -> dict:
     start = time.perf_counter()
     taxonomy = taxonomy_all_fast(workspace_root)
-    total = int(_load_index_summary(workspace_root).get("total_memory_count", 0)) + int(summary_native(workspace_root)["summary"]["memory_count"])
+    total = int(_load_index_summary(workspace_root).get("total_memory_count", 0)) + int(
+        summary_native(workspace_root)["summary"]["memory_count"]
+    )
     return {
         "backend": "skeleton",
         "total_drawers": total,
@@ -2235,7 +2594,6 @@ def status_all_fast(workspace_root: str) -> dict:
         "aaak_dialect": None,
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def taxonomy_all_fast(workspace_root: str) -> dict:
@@ -2254,18 +2612,18 @@ def taxonomy_all_fast(workspace_root: str) -> dict:
         rooms.update(room_map)
     return {
         "backend": "skeleton",
-        "taxonomy": {wing: dict(sorted(room_map.items())) for wing, room_map in sorted(merged.items())},
+        "taxonomy": {
+            wing: dict(sorted(room_map.items())) for wing, room_map in sorted(merged.items())
+        },
         "wings": wings,
         "rooms": dict(sorted(rooms.items())),
         "elapsed_ms": _elapsed_ms(start),
     }
 
 
-
 def list_wings_all_fast(workspace_root: str) -> dict:
     result = taxonomy_all_fast(workspace_root)
     return {"backend": "skeleton", "wings": result["wings"], "elapsed_ms": result["elapsed_ms"]}
-
 
 
 def list_rooms_all_fast(workspace_root: str, wing: Optional[str] = None) -> dict:
@@ -2286,11 +2644,13 @@ def list_rooms_all_fast(workspace_root: str, wing: Optional[str] = None) -> dict
     }
 
 
-
 def graph_stats_all_fast(workspace_root: str) -> dict:
     start = time.perf_counter()
     room_data: dict[str, dict] = defaultdict(lambda: {"wings": set(), "count": 0, "recent": ""})
-    for source in (_snapshot_room_graph_nodes(workspace_root), _native_room_graph_nodes(workspace_root)):
+    for source in (
+        _snapshot_room_graph_nodes(workspace_root),
+        _native_room_graph_nodes(workspace_root),
+    ):
         for room_name, data in source.items():
             room_data[room_name]["wings"].update(data.get("wings", set()))
             room_data[room_name]["count"] += int(data.get("count", 0))
@@ -2311,7 +2671,6 @@ def graph_stats_all_fast(workspace_root: str) -> dict:
     return stats
 
 
-
 def top_topics_all_fast(workspace_root: str, snapshot: Optional[str] = None) -> dict:
     if snapshot == FAST_NATIVE_SNAPSHOT:
         return top_topics_native(workspace_root)
@@ -2326,7 +2685,6 @@ def top_topics_all_fast(workspace_root: str, snapshot: Optional[str] = None) -> 
         "topics": [{"topic": topic, "count": count} for topic, count in counts.most_common(10)],
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def top_files_all_fast(workspace_root: str, snapshot: Optional[str] = None) -> dict:
@@ -2345,8 +2703,9 @@ def top_files_all_fast(workspace_root: str, snapshot: Optional[str] = None) -> d
     }
 
 
-
-def neighbors_all_fast(workspace_root: str, snapshot: str, node_index: int = None, drawer_id: str = None) -> dict:
+def neighbors_all_fast(
+    workspace_root: str, snapshot: str, node_index: int = None, drawer_id: str = None
+) -> dict:
     if snapshot == FAST_NATIVE_SNAPSHOT:
         if not drawer_id:
             return {
@@ -2357,14 +2716,18 @@ def neighbors_all_fast(workspace_root: str, snapshot: str, node_index: int = Non
                 "elapsed_ms": 0.0,
             }
         return neighbors_native(workspace_root, drawer_id)
-    return neighbors_fast(workspace_root, snapshot=snapshot, node_index=node_index if node_index is not None else -1)
-
+    return neighbors_fast(
+        workspace_root, snapshot=snapshot, node_index=node_index if node_index is not None else -1
+    )
 
 
 def traverse_all_fast(workspace_root: str, start_room: str, max_hops: int = 2) -> dict:
     start = time.perf_counter()
     room_data: dict[str, dict] = defaultdict(lambda: {"wings": set(), "count": 0, "recent": ""})
-    for source in (_snapshot_room_graph_nodes(workspace_root), _native_room_graph_nodes(workspace_root)):
+    for source in (
+        _snapshot_room_graph_nodes(workspace_root),
+        _native_room_graph_nodes(workspace_root),
+    ):
         for room_name, data in source.items():
             room_data[room_name]["wings"].update(data.get("wings", set()))
             room_data[room_name]["count"] += int(data.get("count", 0))
@@ -2379,7 +2742,13 @@ def traverse_all_fast(workspace_root: str, start_room: str, max_hops: int = 2) -
             "max_hops": max_hops,
             "graph_model": "shared-room projection",
             "paths": [
-                {"from": item.get("connected_via", [start_room])[0] if item.get("connected_via") else start_room, "to": item["room"], "depth": item["hop"]}
+                {
+                    "from": item.get("connected_via", [start_room])[0]
+                    if item.get("connected_via")
+                    else start_room,
+                    "to": item["room"],
+                    "depth": item["hop"],
+                }
                 for item in traversal.get("results", [])
                 if item.get("hop", 0) > 0
             ],
@@ -2389,11 +2758,15 @@ def traverse_all_fast(workspace_root: str, start_room: str, max_hops: int = 2) -
     return traversal
 
 
-
-def find_tunnels_all_fast(workspace_root: str, wing_a: Optional[str] = None, wing_b: Optional[str] = None) -> dict:
+def find_tunnels_all_fast(
+    workspace_root: str, wing_a: Optional[str] = None, wing_b: Optional[str] = None
+) -> dict:
     start = time.perf_counter()
     room_data: dict[str, dict] = defaultdict(lambda: {"wings": set(), "count": 0, "recent": ""})
-    for source in (_snapshot_room_graph_nodes(workspace_root), _native_room_graph_nodes(workspace_root)):
+    for source in (
+        _snapshot_room_graph_nodes(workspace_root),
+        _native_room_graph_nodes(workspace_root),
+    ):
         for room_name, data in source.items():
             room_data[room_name]["wings"].update(data.get("wings", set()))
             room_data[room_name]["count"] += int(data.get("count", 0))
@@ -2410,20 +2783,22 @@ def find_tunnels_all_fast(workspace_root: str, wing_a: Optional[str] = None, win
     }
 
 
-
 def list_snapshots_all_fast(workspace_root: str) -> dict:
     start = time.perf_counter()
     snapshots = list(_load_index_summary(workspace_root).get("snapshots", []))
     if FAST_NATIVE_SNAPSHOT not in snapshots:
         snapshots.append(FAST_NATIVE_SNAPSHOT)
-    latest_snapshot = FAST_NATIVE_SNAPSHOT if _native_records(workspace_root) else _load_index_summary(workspace_root).get("latest_snapshot")
+    latest_snapshot = (
+        FAST_NATIVE_SNAPSHOT
+        if _native_records(workspace_root)
+        else _load_index_summary(workspace_root).get("latest_snapshot")
+    )
     return {
         "backend": "skeleton",
         "snapshots": snapshots,
         "latest_snapshot": latest_snapshot,
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def load_index_all_fast(workspace_root: str) -> dict:
@@ -2451,16 +2826,23 @@ def load_index_all_fast(workspace_root: str) -> dict:
         "index_path": str(native_index["index_path"]),
         "snapshots": snapshots,
         "snapshot_summaries": snapshot_summaries,
-        "global_top_topics": [item["topic"] for item in top_topics_all_fast(workspace_root)["topics"][:5]],
-        "global_top_files": [item["path"] for item in top_files_all_fast(workspace_root)["files"][:5]],
-        "global_task_topics": list(skeleton.get("global_task_topics", [])) + list(native.get("task_topics", [])),
-        "latest_snapshot": FAST_NATIVE_SNAPSHOT if native["memory_count"] else skeleton.get("latest_snapshot"),
+        "global_top_topics": [
+            item["topic"] for item in top_topics_all_fast(workspace_root)["topics"][:5]
+        ],
+        "global_top_files": [
+            item["path"] for item in top_files_all_fast(workspace_root)["files"][:5]
+        ],
+        "global_task_topics": list(skeleton.get("global_task_topics", []))
+        + list(native.get("task_topics", [])),
+        "latest_snapshot": FAST_NATIVE_SNAPSHOT
+        if native["memory_count"]
+        else skeleton.get("latest_snapshot"),
         "snapshot_count": len(snapshots),
-        "total_memory_count": int(skeleton.get("total_memory_count", 0)) + int(native["memory_count"]),
+        "total_memory_count": int(skeleton.get("total_memory_count", 0))
+        + int(native["memory_count"]),
         "index_text": native_index["index_text"],
         "elapsed_ms": _elapsed_ms(start),
     }
-
 
 
 def summary_for_any_snapshot(workspace_root: str, snapshot: str) -> dict:
@@ -2469,12 +2851,10 @@ def summary_for_any_snapshot(workspace_root: str, snapshot: str) -> dict:
     return summary_for_snapshot(workspace_root, snapshot)
 
 
-
 def read_any_snapshot_module(workspace_root: str, snapshot: str, module: str) -> dict:
     if snapshot == FAST_NATIVE_SNAPSHOT:
         return read_native_module(workspace_root, module)
     return read_snapshot_module(workspace_root, snapshot, module)
-
 
 
 def _clear_caches() -> None:
@@ -2484,7 +2864,6 @@ def _clear_caches() -> None:
     _SNAPSHOT_RECORD_CACHE.clear()
     _ALL_RECORDS_CACHE.clear()
     _GRAPH_COUNTS_CACHE.clear()
-
 
 
 def refresh_fast_state() -> None:

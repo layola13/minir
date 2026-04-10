@@ -8,6 +8,7 @@ sys.path.append(os.getcwd())
 
 from mimir.skeleton_search import search_all_fast, load_index_all_fast
 
+
 def skeleton_only_stress_test():
     workspace = os.getcwd()
     print(f"🧠 Mimir 骨架纯度压测开始 (工作区: {workspace})")
@@ -22,7 +23,18 @@ def skeleton_only_stress_test():
     print(f"  - 骨架索引加载耗时: {idx_ms:.3f}ms")
 
     # 2. 模拟高频 AI 检索（连续 100 次不同关键词查询）
-    test_keywords = ["autosave", "skeleton", "stress", "mempalace", "decision", "problem", "memory", "hook", "fast", "native"]
+    test_keywords = [
+        "autosave",
+        "skeleton",
+        "stress",
+        "mempalace",
+        "decision",
+        "problem",
+        "memory",
+        "hook",
+        "fast",
+        "native",
+    ]
 
     latencies = []
     print("  - 正在执行 100 次纯骨架 AST 检索...")
@@ -45,13 +57,14 @@ def skeleton_only_stress_test():
         "avg_search_latency_ms": round(avg_latency, 3),
         "p99_search_latency_ms": round(p99_latency, 3),
         "index_load_ms": round(idx_ms, 3),
-        "theoretical_qps": round(qps, 2)
+        "theoretical_qps": round(qps, 2),
     }
     print(json.dumps(report, indent=2))
 
     # 写入结果
     with open("benchmarks/skeleton_pure_perf.json", "w") as f:
         json.dump(report, f, indent=2)
+
 
 if __name__ == "__main__":
     skeleton_only_stress_test()

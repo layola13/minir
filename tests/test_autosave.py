@@ -5,8 +5,10 @@ import os
 from pathlib import Path
 import subprocess
 
+
 def _patch_memories(monkeypatch, memories):
     monkeypatch.setattr("mimir.autosave.extract_memories", lambda normalized: memories)
+
 
 def _sample_memories():
     return [
@@ -22,6 +24,7 @@ def _sample_memories():
         },
     ]
 
+
 def test_non_git_file_summary_extraction():
     text = "Created src/new_feature.py\nEdited mimir/normalize.py\nDeleted old_notes.md\n"
     summary = _summarize_file_changes(text)
@@ -31,6 +34,7 @@ def test_non_git_file_summary_extraction():
     assert "- mimir/normalize.py" in summary
     assert "deleted:" in summary
     assert "- old_notes.md" in summary
+
 
 def test_persist_autosave_writes_skeleton_package(tmp_path, monkeypatch):
     snapshot = tmp_path / "session.jsonl"
@@ -70,6 +74,7 @@ def test_persist_autosave_writes_skeleton_package(tmp_path, monkeypatch):
     assert "SESSION_SUMMARIES" in index_text
     assert "session-123" in index_text
 
+
 def test_save_hook_skeleton_flow(tmp_path):
     repo_root = Path(os.getcwd())
     home = tmp_path / "home"
@@ -84,11 +89,13 @@ def test_save_hook_skeleton_flow(tmp_path):
         content += json.dumps({"message": {"role": "assistant", "content": "ok"}}) + "\n"
     transcript.write_text(content, encoding="utf-8")
 
-    payload = json.dumps({
-        "session_id": session_id,
-        "stop_hook_active": False,
-        "transcript_path": str(transcript),
-    })
+    payload = json.dumps(
+        {
+            "session_id": session_id,
+            "stop_hook_active": False,
+            "transcript_path": str(transcript),
+        }
+    )
 
     env = {
         **os.environ,
@@ -114,11 +121,12 @@ def test_save_hook_skeleton_flow(tmp_path):
     assert last_save_file.exists()
     assert last_save_file.read_text().strip() == "15"
 
+
 def test_persist_autosave_zero_memories_still_succeeds(tmp_path, monkeypatch):
     snapshot = tmp_path / "empty.jsonl"
     snapshot.write_text('{"message": {"role": "user", "content": "hi"}}\n', encoding="utf-8")
 
-    _patch_memories(monkeypatch, []) # Zero memories
+    _patch_memories(monkeypatch, [])  # Zero memories
     monkeypatch.setattr("mimir.autosave._git_repo_root", lambda workspace_root: None)
 
     memory_count, wrote_skeleton = persist_autosave(
@@ -134,6 +142,7 @@ def test_persist_autosave_zero_memories_still_succeeds(tmp_path, monkeypatch):
     assert wrote_skeleton is True
     assert snapshot_skeleton_output_path(str(tmp_path), str(snapshot)).exists()
 
+
 def test_mcp_server_skeleton_routing(tmp_path, monkeypatch):
     snapshot = tmp_path / "session.jsonl"
     snapshot.write_text('{"message": {"role": "user", "content": "test mcp"}}\n', encoding="utf-8")
@@ -142,9 +151,73 @@ def test_mcp_server_skeleton_routing(tmp_path, monkeypatch):
     persist_autosave(str(snapshot), "w", "a", str(tmp_path), "stop", "s1")
 
     from mimir import mcp_server
+
     res = mcp_server.tool_status()
     assert res["total_drawers"] >= 0
     assert "protocol" in res
 
     idx = mcp_server.tool_fast_skeleton_index()
     assert idx["exists"] is True
+
+
+def test_fast_native_backfill_populates_drawers_diary_kg(tmp_path):
+    skeleton_root = tmp_path / ".mimir" / "skeleton"
+    skeleton_root.mkdir(parents=True, exist_ok=True)
+    index_text = "\n".join(
+        [
+            "from __future__ import annotations",
+            "",
+            "SNAPSHOTS = ['snapshot_demo_stop']",
+            "LATEST_SNAPSHOT = 'snapshot_demo_stop'",
+            "SNAPSHOT_SUMMARIES = [{"
+            "'name': 'snapshot_demo_stop', "
+            "'memory_count': 5, "
+            "'task_description': 'Fix stop hook timeout', "
+            "'task_topics': ['hook', 'autosave'], "
+            "'top_topics': ['hook', 'skeleton'], "
+            "'top_files': ['hooks/mimir_save_hook.sh'], "
+            "'mtime': 1775792969"
+            "}]",
+            "SNAPSHOT_COUNT = 1",
+            "TOTAL_MEMORY_COUNT = 5",
+            "GLOBAL_TOP_TOPICS = ['hook']",
+            "GLOBAL_TOP_FILES = ['hooks/mimir_save_hook.sh']",
+            "GLOBAL_TASK_TOPICS = ['hook', 'autosave']",
+            "SESSIONS = ['session-demo']",
+            "LATEST_SESSION = 'session-demo'",
+            "SESSION_SUMMARIES = [{"
+            "'session_id': 'session-demo', "
+            "'snapshots': ['snapshot_demo_stop'], "
+            "'latest_snapshot': 'snapshot_demo_stop', "
+            "'latest_task_description': 'Fix stop hook timeout', "
+            "'latest_task_topics': ['hook'], "
+            "'updated_at': '2026-04-10T03:49:29Z'"
+            "}]",
+            "",
+        ]
+    )
+    (skeleton_root / "__index__.py").write_text(index_text, encoding="utf-8")
+
+    from mimir.skeleton_search import load_native_index, read_native_module, summary_native
+
+    native_index = load_native_index(str(tmp_path))
+    native_summary = summary_native(str(tmp_path))["summary"]
+
+    assert native_index["exists"] is True
+    assert native_summary["drawers"] >= 1
+    assert native_summary["diary_entries"] >= 1
+    assert native_summary["kg_triples"] >= 1
+    assert native_summary["memory_count"] == (
+        native_summary["drawers"] + native_summary["diary_entries"] + native_summary["kg_triples"]
+    )
+
+    drawers_module = read_native_module(str(tmp_path), "drawers")
+    diary_module = read_native_module(str(tmp_path), "diary")
+    kg_module = read_native_module(str(tmp_path), "kg")
+
+    assert drawers_module["success"] is True
+    assert diary_module["success"] is True
+    assert kg_module["success"] is True
+    assert "DrawerRecord(" in drawers_module["content"]
+    assert "DiaryEntry(" in diary_module["content"]
+    assert "KGTriple(" in kg_module["content"]

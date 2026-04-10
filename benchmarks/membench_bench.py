@@ -13,6 +13,7 @@ sys.path.append(os.getcwd())
 from mimir.autosave import persist_autosave
 from mimir.skeleton_search import search_all_fast
 
+
 def benchmark_membench(data_dir, limit=0):
     print(f"🧠 Mimir × MemBench Stress Test: {data_dir}")
 
@@ -63,12 +64,19 @@ def benchmark_membench(data_dir, limit=0):
                         user = turn.get("user") or turn.get("user_message", "")
                         asst = turn.get("assistant") or turn.get("assistant_message", "")
                         if user:
-                            f.write(json.dumps({"message": {"role": "user", "content": user}}) + "\n")
+                            f.write(
+                                json.dumps({"message": {"role": "user", "content": user}}) + "\n"
+                            )
                         if asst:
-                            f.write(json.dumps({"message": {"role": "assistant", "content": asst}}) + "\n")
+                            f.write(
+                                json.dumps({"message": {"role": "assistant", "content": asst}})
+                                + "\n"
+                            )
 
             gen_start = time.perf_counter()
-            persist_autosave(str(transcript_path), "bench", "bench", str(it_workspace), "stop", item_id)
+            persist_autosave(
+                str(transcript_path), "bench", "bench", str(it_workspace), "stop", item_id
+            )
             gen_ms = (time.perf_counter() - gen_start) * 1000
 
             # 2. Query Test
@@ -76,14 +84,12 @@ def benchmark_membench(data_dir, limit=0):
             search_all_fast(str(it_workspace), query=question, limit=5)
             q_ms = (time.perf_counter() - q_start) * 1000
 
-            results["iterations"].append({
-                "id": item_id,
-                "gen_ms": gen_ms,
-                "query_ms": q_ms
-            })
+            results["iterations"].append({"id": item_id, "gen_ms": gen_ms, "query_ms": q_ms})
 
             if (idx + 1) % 20 == 0:
-                print(f"  Processed {idx+1}/{len(items)} | Gen: {gen_ms:5.1f}ms | Query: {q_ms:5.2f}ms")
+                print(
+                    f"  Processed {idx + 1}/{len(items)} | Gen: {gen_ms:5.1f}ms | Query: {q_ms:5.2f}ms"
+                )
 
     finally:
         shutil.rmtree(tmp_workspace, ignore_errors=True)
@@ -98,12 +104,13 @@ def benchmark_membench(data_dir, limit=0):
         "avg_item_ingest_ms": round(avg_gen, 2),
         "avg_query_latency_ms": round(avg_query, 2),
         "total_time_s": round(total_elapsed, 2),
-        "throughput_qps": round(len(items) / total_elapsed, 2)
+        "throughput_qps": round(len(items) / total_elapsed, 2),
     }
     print(json.dumps(final_report, indent=2))
 
     with open("benchmarks/results_membench_perf.json", "w") as f:
         json.dump(final_report, f, indent=2)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

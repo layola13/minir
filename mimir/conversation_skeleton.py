@@ -10,7 +10,9 @@ import re
 import shutil
 from typing import Dict, List, Sequence, Tuple
 
-FILE_PATH_RE = re.compile(r"(?:[\w.-]+/)+[\w.-]+|[\w.-]+\.(?:py|js|ts|tsx|jsx|go|rs|rb|java|json|yaml|yml|toml|md|sh|sql|css|html)")
+FILE_PATH_RE = re.compile(
+    r"(?:[\w.-]+/)+[\w.-]+|[\w.-]+\.(?:py|js|ts|tsx|jsx|go|rs|rb|java|json|yaml|yml|toml|md|sh|sql|css|html)"
+)
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}")
 NOISE_MESSAGE_PREFIXES = (
     "<local-command-caveat>",
@@ -104,7 +106,7 @@ def _is_noise_message(text: str) -> bool:
 
 
 def _extract_files(text: str) -> List[str]:
-    return sorted({match.rstrip('.,:;)]}') for match in FILE_PATH_RE.findall(text)})
+    return sorted({match.rstrip(".,:;)]}") for match in FILE_PATH_RE.findall(text)})
 
 
 def _extract_tokens(text: str) -> List[str]:
@@ -221,7 +223,9 @@ def _hard_edges(memories: Sequence[Dict[str, object]]) -> List[dict]:
         left = str(memories[idx].get("memory_type", "general"))
         right = str(memories[idx + 1].get("memory_type", "general"))
         if left == right:
-            edges.append({"source": idx, "target": idx + 1, "relation": "follows_from", "label": None})
+            edges.append(
+                {"source": idx, "target": idx + 1, "relation": "follows_from", "label": None}
+            )
     return edges
 
 
@@ -326,7 +330,9 @@ def _task_topics(messages: Sequence[dict], memories: Sequence[Dict[str, object]]
     return [token for token, _ in ranked[:3]]
 
 
-def _summary_module_text(snapshot_name: str, task_description: str, task_topics: Sequence[str], stats: dict) -> str:
+def _summary_module_text(
+    snapshot_name: str, task_description: str, task_topics: Sequence[str], stats: dict
+) -> str:
     lines = [
         "from __future__ import annotations",
         "",
@@ -426,7 +432,9 @@ def build_relationship_skeleton(memories: Sequence[Dict[str, object]]) -> Tuple[
         "TOPIC_CLUSTERS = [",
     ]
     for group in topic_groups:
-        topics_lines.append(f"    TopicCluster(name={_quoted(group['name'])}, members={group['memory_indexes']!r}),")
+        topics_lines.append(
+            f"    TopicCluster(name={_quoted(group['name'])}, members={group['memory_indexes']!r}),"
+        )
     topics_lines.append("]")
     topics_lines.append("")
 
@@ -444,7 +452,9 @@ def build_relationship_skeleton(memories: Sequence[Dict[str, object]]) -> Tuple[
         "FILE_REFERENCES = [",
     ]
     for group in file_groups:
-        files_lines.append(f"    FileReference(path={_quoted(group['path'])}, members={group['memory_indexes']!r}),")
+        files_lines.append(
+            f"    FileReference(path={_quoted(group['path'])}, members={group['memory_indexes']!r}),"
+        )
     files_lines.append("]")
     files_lines.append("")
 
@@ -462,7 +472,9 @@ def build_relationship_skeleton(memories: Sequence[Dict[str, object]]) -> Tuple[
         "REPEATED_PATTERNS = [",
     ]
     for group in pattern_groups:
-        patterns_lines.append(f"    PatternGroup(name={_quoted(group['name'])}, members={group['memory_indexes']!r}),")
+        patterns_lines.append(
+            f"    PatternGroup(name={_quoted(group['name'])}, members={group['memory_indexes']!r}),"
+        )
     patterns_lines.append("]")
     patterns_lines.append("")
 
@@ -693,9 +705,15 @@ def _session_summaries(root_dir: Path) -> List[dict]:
             continue
         session_id = str(_read_literal_assignment(file_path, "SESSION_ID", file_path.stem))
         snapshots = [str(item) for item in _read_literal_assignment(file_path, "SNAPSHOTS", [])]
-        latest_snapshot = _read_literal_assignment(file_path, "LATEST_SNAPSHOT", snapshots[-1] if snapshots else None)
-        latest_task_description = str(_read_literal_assignment(file_path, "LATEST_TASK_DESCRIPTION", ""))
-        latest_task_topics = [str(item) for item in _read_literal_assignment(file_path, "LATEST_TASK_TOPICS", [])]
+        latest_snapshot = _read_literal_assignment(
+            file_path, "LATEST_SNAPSHOT", snapshots[-1] if snapshots else None
+        )
+        latest_task_description = str(
+            _read_literal_assignment(file_path, "LATEST_TASK_DESCRIPTION", "")
+        )
+        latest_task_topics = [
+            str(item) for item in _read_literal_assignment(file_path, "LATEST_TASK_TOPICS", [])
+        ]
         updated_at = str(_read_literal_assignment(file_path, "UPDATED_AT", ""))
         records.append(
             {
@@ -708,7 +726,9 @@ def _session_summaries(root_dir: Path) -> List[dict]:
                 "updated_at": updated_at,
             }
         )
-    records.sort(key=lambda item: (str(item.get("updated_at", "")), str(item.get("session_id", ""))))
+    records.sort(
+        key=lambda item: (str(item.get("updated_at", "")), str(item.get("session_id", "")))
+    )
     return records
 
 
@@ -741,7 +761,7 @@ def _read_literal_assignment(file_path: Path, name: str, fallback):
     prefix = f"{name} = "
     for line in file_path.read_text(encoding="utf-8").splitlines():
         if line.startswith(prefix):
-            return ast.literal_eval(line[len(prefix):])
+            return ast.literal_eval(line[len(prefix) :])
     return fallback
 
 
@@ -797,23 +817,30 @@ def _global_summary(snapshots: Sequence[dict]) -> dict:
 
 def _snapshot_sort_key(snapshot_dir: Path) -> tuple[int, str]:
     name = snapshot_dir.name
-    stem = name[len("snapshot_"):] if name.startswith("snapshot_") else name
+    stem = name[len("snapshot_") :] if name.startswith("snapshot_") else name
     match = re.search(r"(\d{8}_\d{6})", stem)
     if match:
         return (1, match.group(1))
     rollout = re.search(r"rollout-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})", stem)
     if rollout:
-        return (1, f"{rollout.group(1).replace('-', '')}_{rollout.group(2)}{rollout.group(3)}{rollout.group(4)}")
+        return (
+            1,
+            f"{rollout.group(1).replace('-', '')}_{rollout.group(2)}{rollout.group(3)}{rollout.group(4)}",
+        )
     return (0, f"{int(snapshot_dir.stat().st_mtime)}_{name}")
 
 
 def _write_index(root_dir: Path) -> None:
     _ensure_skeleton_layout(root_dir)
     snapshots_dir = root_dir / "snapshots"
-    snapshot_dirs = sorted(
-        (path for path in snapshots_dir.iterdir() if path.is_dir()),
-        key=_snapshot_sort_key,
-    ) if snapshots_dir.exists() else []
+    snapshot_dirs = (
+        sorted(
+            (path for path in snapshots_dir.iterdir() if path.is_dir()),
+            key=_snapshot_sort_key,
+        )
+        if snapshots_dir.exists()
+        else []
+    )
     snapshots = [_snapshot_summary(path) for path in snapshot_dirs]
     latest_snapshot = snapshots[-1]["name"] if snapshots else None
     sessions = _session_summaries(root_dir)
