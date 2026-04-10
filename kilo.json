@@ -1,0 +1,13 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "mcp": {
+    "mimir": {
+      "type": "local",
+      "command": ["python3", "-m", "mimir.mcp_server"],
+      "enabled": true,
+      "environment": {
+        "PYTHONPATH": "/home/vscode/projects/mempalace"
+      }
+    }
+  }
+}
